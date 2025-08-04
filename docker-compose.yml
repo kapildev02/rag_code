@@ -1,0 +1,52 @@
+version: '3.9'
+
+services:
+  backend:
+    build: ./intuitiveobjects-rag-api
+    ports:
+      - "8888:8888"
+    environment:
+      - -OLLAMA_BASE_URL=http://ollama:11435
+    env_file:
+      - ./intuitiveobjects-rag-api/.env
+    depends_on:
+      - mongo_custom
+      - ollama
+    networks:
+      - app-network
+
+  frontend:
+    build: ./intuitiveobjects-rag-ui
+    ports:
+      - "3030:3030"
+    networks:
+      - app-network
+  
+  mongo_custom:
+    image: mongo
+    container_name: mongo_custom
+    ports:
+      - "27018:27017"
+    networks:
+      - app-network 
+    volumes:
+      - /home/kapildev/code/mongo_storage:/data/db
+
+
+  ollama:
+    image: ollama/ollama
+    ports:
+       - "11435:11434"
+    command: serve
+    networks:
+      - app-network
+    volumes:
+      - /home/kapildev/code/ollama_storage:/root/.ollama
+
+networks:
+  app-network:
+    driver: bridge
+
+# volumes:
+#   mongo_data:
+#   ollama_data:
