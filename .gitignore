@@ -1,6 +1,7 @@
 mongo_storage/
 ollama_storage/
 chromadb_storage/
+intuitiveobjects-rag-api/service-account-key.json
 # Python
 __pycache__/
 *.py[cod]
