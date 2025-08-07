@@ -36,3 +36,4 @@ api_venv/
 .vercel/
 
 /uploads/
+echo "intuitiveobjects-rag-api/service-account-key.json" >> .gitignore
