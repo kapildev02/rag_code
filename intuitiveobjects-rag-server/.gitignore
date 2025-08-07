@@ -1,0 +1,48 @@
+# Python
+__pycache__/
+*.pyo
+*.pyd
+*.egg-info/
+dist/
+build/
+*.whl
+
+# Virtual Environment
+api_venv/
+venv/
+env/
+ENV/
+./venv/
+
+# IDEs and Editors
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+
+# Environment Variables
+.env
+*.env
+
+# Python bytecode cache
+__pycache__/
+*.py[cod]
+
+# Data - keep folder, ignore contents
+/output_md_files/*
+!/output_md_files/.gitkeep
+
+/splited_pdf_pages/*
+!/splited_pdf_pages/.gitkeep
+
+/chromadb_storage/*
+!/chromadb_storage/.gitkeep
+
+# Logs
+*.log
+
+# Deployment
+.vercel/
+
+/uploads/__pycache__/
