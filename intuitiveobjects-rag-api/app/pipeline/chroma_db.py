@@ -24,7 +24,7 @@ logger = setup_logger(__name__, log_level=logging.DEBUG)
 # Set up ChromaDB client
 # PERSIST_DIRECTORY = os.path.join(os.getcwd(), "/home/vishwa/harry_rag/intuitiveobjects-rag-api/chroma_storage")
 # os.makedirs(PERSIST_DIRECTORY, exist_ok=True)
-PERSIST_DIRECTORY = "/home/vishwa/harry_rag/intuitiveobjects-rag-api/chroma_storage"
+PERSIST_DIRECTORY = "chroma_storage"
 os.makedirs(PERSIST_DIRECTORY, exist_ok=True)
 chroma_client = chromadb.PersistentClient(path=PERSIST_DIRECTORY)
 
