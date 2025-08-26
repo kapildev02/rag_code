@@ -1,5 +1,6 @@
 from app.db.mongodb import (
     connect_to_mongodb,
+    organization_file_collection,
     document_collection,
     get_fs
 )
@@ -20,8 +21,8 @@ import hashlib
 async def on_message(task: aio_pika.IncomingMessage):
     try:
         message = json.loads(task.body.decode())
-        print(f"TASK: doc: {message["doc_id"]}")
-        
+        print(f"TASK: doc: {message['doc_id']}")
+
         # doc id
         doc_id = message["doc_id"]
         user_id = message["user_id"]
@@ -59,7 +60,7 @@ async def on_message(task: aio_pika.IncomingMessage):
             )
             await task.ack()
             return
-            
+
         doc_result = await document_collection().find_one(
             ObjectId(doc_id)
         )
@@ -86,7 +87,7 @@ async def on_message(task: aio_pika.IncomingMessage):
         
         hash_key = hashlib.sha256(file_data.getvalue()).hexdigest()
         print(f"hash_key: {hash_key}")
-        
+
         is_duplicate = await document_collection().find_one({
             "hash_key": hash_key,
             "organization_id": doc_result["organization_id"],
@@ -122,8 +123,8 @@ async def on_message(task: aio_pika.IncomingMessage):
             )
             await task.ack()
             return
-            
-    
+
+
         await document_collection().update_one(
             {"_id": ObjectId(doc_id)},
             {
@@ -164,8 +165,8 @@ async def on_message(task: aio_pika.IncomingMessage):
                 "uploaded_at": datetime.now()
             }
         )
-    
-        
+
+
         await document_collection().update_one(
             {"_id": ObjectId(doc_id)},
             {
@@ -201,7 +202,7 @@ async def on_message(task: aio_pika.IncomingMessage):
             settings.MD_FILE_CONVERSION_QUEUE,
             json.dumps(rabbitmq_job)
         )
-        
+
         await document_collection().update_one(
             {"_id": ObjectId(doc_id)},
             {

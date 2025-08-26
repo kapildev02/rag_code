@@ -387,8 +387,12 @@ async def create_organization_app_config(
         )
         return OrganizationAppConfigEntity(new_config)
 
-async def get_updated_app_config():
-    organization_app_configs = await organization_app_config_collection().find_one(sort=[("updated_at", -1)])
+async def get_updated_app_config(organization_id: str):
+    organization_app_configs = await organization_app_config_collection().find_one(
+        {"organization_id": organization_id}
+    )
+    if not organization_app_configs:    
+        raise HTTPException(status_code=404, detail="Organization app config not found")    
     # print("app_organization_app_configs", organization_app_configs)
     return OrganizationAppConfigEntity(organization_app_configs)
 
@@ -399,7 +403,7 @@ async def get_organization_app_configs(user_id: str):
     )
 
     if not existing_user:
-        raise HTTPException(status_code=404, detail="User not found")
+        raise HTTPException(status_code=404, detail="Admin not found")
 
     organization_id = existing_user["organization_id"]
 
@@ -424,7 +428,7 @@ async def get_organization_admin_profile(user_id: str):
     )
 
     if not existing_user:
-        raise HTTPException(status_code=404, detail="User not found")
+        raise HTTPException(status_code=404, detail="Admin not found")
 
     organization_id = existing_user["organization_id"]
 

@@ -16,34 +16,40 @@ type FileType = {
   tag?: string;
 };
 
+type ConfirmAction = {
+  open: boolean;
+  actionType: "mongodb" | "chromadb" | null;
+  input: string;
+};
+
 const AdditionalTab = () => {
   const dispatch = useAppDispatch();
   const [loading, setLoading] = useState(false);
   const [fileId, setFileId] = useState("");
   const [files, setFiles] = useState<FileType[]>([]);
+  const [confirm, setConfirm] = useState<ConfirmAction>({
+    open: false,
+    actionType: null,
+    input: "",
+  });
 
-  // Group files by tags
   const groupedFiles = files.reduce((acc, file) => {
-    // If tags is an array, group by each tag
     if (Array.isArray(file.tags)) {
       file.tags.forEach((tag: string) => {
         if (!acc[tag]) acc[tag] = [];
         acc[tag].push(file);
       });
     } else if (file.tag) {
-      // If single tag
       const tag = file.tag;
       if (!acc[tag]) acc[tag] = [];
       acc[tag].push(file);
     } else {
-      // fallback for files without tag
       if (!acc["untagged"]) acc["untagged"] = [];
       acc["untagged"].push(file);
     }
     return acc;
   }, {} as Record<string, FileType[]>);
 
-  // Fetch file list on mount
   useEffect(() => {
     const fetchFiles = async () => {
       try {
@@ -51,43 +57,39 @@ const AdditionalTab = () => {
         if (response.success && Array.isArray(response.data)) {
           setFiles(response.data);
         }
-      } catch (err) {
+      } catch {
         toast.error("Failed to fetch files");
       }
     };
     fetchFiles();
   }, [dispatch]);
 
-  const handleResetChroma = async () => {
-    setLoading(true);
-    try {
-      const response = await dispatch(orgResetChromaApi()).unwrap();
-      toast[response.success ? "success" : "error"](
-        response.success
-          ? "ChromaDB reset successfully"
-          : "Failed to reset ChromaDB"
-      );
-    } catch (err: any) {
-      toast.error(
-        "Error resetting ChromaDB: " + (err.message || "Unknown error")
-      );
-    } finally {
-      setLoading(false);
-    }
+  const triggerReset = (type: "mongodb" | "chromadb") => {
+    setConfirm({ open: true, actionType: type, input: "" });
   };
 
-  const handleResetMongo = async () => {
+  const handleConfirm = async () => {
+    if (!confirm.actionType) return;
+
     setLoading(true);
+    setConfirm({ open: false, actionType: null, input: "" });
+
     try {
-      const response = await dispatch(orgResetMongoApi()).unwrap();
+      let response;
+      if (confirm.actionType === "mongodb") {
+        response = await dispatch(orgResetMongoApi()).unwrap();
+      } else {
+        response = await dispatch(orgResetChromaApi()).unwrap();
+      }
       toast[response.success ? "success" : "error"](
         response.success
-          ? "MongoDB reset successfully"
-          : "Failed to reset MongoDB"
+          ? `${confirm.actionType} reset successfully`
+          : `Failed to reset ${confirm.actionType}`
       );
     } catch (err: any) {
       toast.error(
-        "Error resetting MongoDB: " + (err.message || "Unknown error")
+        `Error resetting ${confirm.actionType}: ` +
+          (err.message || "Unknown error")
       );
     } finally {
       setLoading(false);
@@ -125,14 +127,14 @@ const AdditionalTab = () => {
       {/* Reset buttons */}
       <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
         <Button
-          onClick={handleResetChroma}
+          onClick={() => triggerReset("chromadb")}
           disabled={loading}
           className="bg-red-600 text-white w-full"
         >
           Reset ChromaDB
         </Button>
         <Button
-          onClick={handleResetMongo}
+          onClick={() => triggerReset("mongodb")}
           disabled={loading}
           className="bg-yellow-500 text-white w-full"
         >
@@ -185,6 +187,50 @@ const AdditionalTab = () => {
           ))}
         </div>
       </div>
+
+      {/* Confirmation Modal */}
+      {confirm.open && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-gray-800 rounded-lg shadow-lg p-6 w-full max-w-md">
+            <h2 className="text-lg font-semibold text-white">
+              Drop {confirm.actionType?.toUpperCase()}?
+            </h2>
+            <p className="mt-2 text-gray-300">
+              Type <b>{`reset ${confirm.actionType}`}</b> to confirm this
+              action.
+            </p>
+            <input
+              type="text"
+              value={confirm.input}
+              onChange={(e) =>
+                setConfirm((prev) => ({ ...prev, input: e.target.value }))
+              }
+              className="w-full border rounded px-3 py-2 mt-4 bg-gray-700 text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              placeholder={`reset ${confirm.actionType}`}
+            />
+            <div className="mt-4 flex justify-end space-x-3">
+              <Button
+                onClick={() =>
+                  setConfirm({ open: false, actionType: null, input: "" })
+                }
+                className="bg-gray-600 text-white hover:bg-gray-700"
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={handleConfirm}
+                disabled={
+                  confirm.input.trim().toLowerCase() !==
+                  `reset ${confirm.actionType}`
+                }
+                className="bg-red-600 text-white hover:bg-red-700"
+              >
+                Confirm Reset
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

@@ -11,6 +11,7 @@ import { orgCreateUserApi, orgGetUsersApi, orgGetCategoriesApi, orgDeleteUserApi
 import { showError, showSuccess, confirmAction } from "@/utils/sweetAlert";
 import { ResponsiveTable } from "@/components/atoms/ResponsiveTable/ResponsiveTable";
 
+
 const initialUserFormState = {
 	email: "",
 	password: "",
@@ -26,7 +27,6 @@ export const UserTab = () => {
 	const [error, setError] = useState<string | null>(null);
 	const [loading, setLoading] = useState(false);
 	const userForm = useFormValidation(initialUserFormState, validateUserForm);
-
 	// Clear error when form values change
 	useEffect(() => {
 		if (error) setError(null);

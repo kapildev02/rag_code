@@ -124,9 +124,19 @@ const LocalFileUpload = ({
       "application/pdf",
       "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
       "application/msword",
+      "text/html",
+      "application/xml",
+      "application/xlsx",
+      "application/xls",
+      "application/json",
+      "video/mp3",
+      "image/jpeg",
+      "image/png",
       "text/plain",
       "text/markdown",
       "text/csv",
+      "application/x-zip-compressed",
+      "application/zip",
       "application/vnd.ms-powerpoint",
       "application/vnd.openxmlformats-officedocument.presentationml.presentation",
     ];
@@ -135,11 +145,21 @@ const LocalFileUpload = ({
       ".pdf",
       ".doc",
       ".docx",
+      ".html",
+      ".xml",
+      ".xlsx",
+      ".xls",
+      ".json",
+      ".png",
+      ".ppt",
+      ".pptx",
+      ".mp3",
       ".txt",
       ".md",
       ".csv",
-      ".ppt",
-      ".pptx",
+      ".zip",
+      ".img",
+      ".jpeg",
     ];
 
     const validFiles = fileArray.filter((file) => {
@@ -151,7 +171,7 @@ const LocalFileUpload = ({
 
     if (validFiles.length !== fileArray.length) {
       toast.error(
-        "Only supported file types are allowed: PDF, DOCX, TXT, CSV, etc."
+        "Only supported file types are allowed: PDF, DOCX, HTML, PPTX, PNG, etc."
       );
     }
 
@@ -237,7 +257,7 @@ const LocalFileUpload = ({
                   type="file"
                   multiple
                   // accept=".pdf"
-                  accept=".pdf,.doc,.docx,.txt,.md,.csv,.ppt,.pptx"
+                  accept=".pdf,.doc,.docx,.txt,.md,.csv,.ppt,.pptx,.xlsx,.mp3,.html,.xml,.json,.png,.jpeg,.zip,.img"
                   onChange={(e) => handleSelectFiles(e.target.files)}
                   className="block w-full text-sm text-gray-300 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-gray-700 file:text-gray-200 hover:file:bg-gray-600  border border-gray-600 rounded-md cursor-pointer"
                 />

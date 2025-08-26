@@ -17,7 +17,7 @@ import aio_pika
 import json
 from app.serializers.organization_file_serializers import OrganizationFileEntity
 from app.utils.auth import get_current_user
-from app.db.mongodb import document_collection
+from app.db.mongodb import organization_file_collection,document_collection, close_mongodb_connection
 from bson import ObjectId
 from fastapi.encoders import jsonable_encoder
 
@@ -32,9 +32,13 @@ async def document_notify(user_id: str, data: dict):
     Notify connected clients about a document-related event.
     """
     doc_id = data.get("doc_id")
-    
+
     file = await document_collection().find_one({"_id": ObjectId(doc_id)})
-    
+
+    if not file:
+        # Optionally log or handle the missing file case
+        return
+
     organization_file = OrganizationFileEntity(file)
     
     if not user_id or user_id not in connected_clients:

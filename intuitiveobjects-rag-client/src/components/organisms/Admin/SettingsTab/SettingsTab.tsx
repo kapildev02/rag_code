@@ -104,7 +104,7 @@ export const SettingsTab = () => {
           >
             <option value="">Select embedding model</option>
             <option value="all-MiniLM-L6-v2">all-MiniLM-L6-v2</option>
-            <option value="nomic-embed-text-v1">nomic-embed-text-v1</option>
+        
             {appConfig &&
               appConfig.length &&
               appConfig[0]?.embedding_models?.map((option: any) => (

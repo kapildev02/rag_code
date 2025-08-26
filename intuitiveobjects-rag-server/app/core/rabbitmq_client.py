@@ -4,7 +4,7 @@ from app.core.config import settings
 
 import logging
 
-# Set global logging level
+# # Set global logging level
 logging.basicConfig(level=logging.INFO)
 
 # Suppress noisy debug logs from RabbitMQ libraries

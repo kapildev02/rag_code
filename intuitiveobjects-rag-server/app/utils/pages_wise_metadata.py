@@ -13,16 +13,17 @@ from langchain.chains import RetrievalQA
 from langchain_chroma import Chroma
 from datetime import datetime
 from bson import ObjectId
-from app.db.mongodb import document_collection
+from app.db.mongodb import document_collection,organization_file_collection, connect_to_mongodb
 from app.core.rabbitmq_client import rabbitmq_client
 import json
 from app.core.config import settings
 
-from app.services.organization_admin_services import get_updated_app_config
+from app.services.organization_admin_services import get_updated_app_config,get_organization_app_configs
 
 
 # Define the directory for ChromaDB persistence
 PERSIST_DIRECTORY = "chromadb_storage"
+
 
 class PDFProcessor:
     def __init__(self,  persist_directory=PERSIST_DIRECTORY):
@@ -135,7 +136,7 @@ class PDFProcessor:
         📌 Guidelines:  
         - Keep the summary concise (max 300 words) but information-dense factually correct with the document.  
         - Prioritize high-yield facts relevant to examination patterns and business decisions.  
-        - Structure output for easy embedding in a vector database.  
+        - Structure output for easy embedding in a vector database.
 
         Text:  
         {content}  
@@ -318,6 +319,9 @@ class PDFProcessor:
                 if not chunks:
                     raise ValueError(f"No chunks were created from {folder_path}")
                 logging.info(f"Successfully created {len(chunks)} chunks")
+                # # Log each chunk's metadata and a preview of its content
+                # for idx, chunk in enumerate(chunks):
+                #     logging.info(f"Chunk {idx+1}: Metadata: {chunk.metadata} | Content Preview: {chunk.page_content[:100]}...")
             except Exception as e:
                 raise Exception(f"Error in chunk creation: {str(e)}")
 
@@ -342,6 +346,7 @@ class PDFProcessor:
             # Save to ChromaDB
             try:
                 self.save_to_chroma(chunks)
+               
                 logging.info(f"Successfully stored chunks in ChromaDB")
             except Exception as e:
                 raise Exception(f"Error saving to ChromaDB: {str(e)}")
@@ -399,15 +404,13 @@ class PDFProcessor:
     async def setup_retrieval_qa(self, model_name: str = "llama2"):
         """Setup the retrieval QA system using Ollama."""
 
-        config= await get_updated_app_config()
-        embedding_model = config.get("embedding_model") or "sentence-transformers/all-MiniLM-L6-v2"
-        logging.info(f"Using embedding model: {embedding_model}")
+      
         try:
             # Use existing vectorstore if available, otherwise create new one
             if self.vectorstore is None:
                 self.vectorstore = Chroma(
                     collection_name="rag-chroma",
-                    embedding_function=embedding_model,
+                    embedding_function=self.embedding_model,
                     persist_directory=self.persist_directory
                 )
 
@@ -436,7 +439,9 @@ class PDFProcessor:
             logging.error(f"Error setting up QA system: {str(e)}")
             return False
 
-    async def ask_question(self, question: str, model_name: str = "gemma2:2b") -> dict:
+   
+
+    async def ask_question(self, user_id: str, question: str, model_name: str = "gemma2:2b") -> dict:
         """
             Ask a question and get answer from the indexed documents.
             Args:
@@ -447,15 +452,23 @@ class PDFProcessor:
         """
 
         # Get organization admin app config to fetch organization-specific config
+        print("Fetching organization user for user_id:", user_id)
 
-        config = await get_updated_app_config()
+        from app.db.mongodb import organization_user_collection
+        existing_user=await organization_user_collection().find_one({"_id": ObjectId(user_id)})
 
-        model_name = config['llm_model'] if "llm_model" in config else "gemma2:2b"
+        organization_id = existing_user.get("organization_id")
+        print("Fetching organization users for organization_id:", organization_id)
+
+        config = await get_updated_app_config(organization_id)
+
+        model_name = config['llm_model'] if "llm_model" in config else "gemma3:1b"
         embedding_model = config['embedding_model'] if "embedding_model" in config else "sentence-transformers/all-MiniLM-L6-v2"
         temperature = config['temperature'] if "temperature" in config else 0.7
 
         logging.info(f"Using model: {model_name}, temperature: {temperature}")
-        # print(f"Using model: {model_name}, temperature: {temperature}")
+        
+       
         try:
             # Set model name
             self.llm_model_name = model_name
@@ -463,20 +476,22 @@ class PDFProcessor:
             # Get relevant documents from vector store
             vectorstore = Chroma(
                 collection_name="rag-chroma",
-                embedding_function=self.embedding_model,
+                embedding_function=HuggingFaceEmbeddings(model_name=embedding_model),
                 persist_directory=self.persist_directory
             )
             
             # Use MMR for better retrieval
             retrieved_docs = vectorstore.max_marginal_relevance_search(
                 question,
-                k=4,  # Number of documents to retrieve
-                fetch_k=8,  # Fetch more candidates for diversity
+                k=5,  # Number of documents to retrieve
+                fetch_k=16,  # Fetch more candidates for diversity
                 lambda_mult=0.7  # Balance between relevance and diversity
             )
             print("retrieved_docs_______", retrieved_docs)
             # Build context from retrieved documents
             context = "\n\n".join([doc.page_content for doc in retrieved_docs])
+
+            print("context ",context)
             
             # Create prompt with context
             prompt = f"""
@@ -499,17 +514,24 @@ class PDFProcessor:
             
             # Format the response
             result = {
-                "answer": response['message']['content'],
+                "answer": response.get("message", {}).get("content", "").strip(),
                 "sources": []
             }
             
             # Add source information
+            # for doc in retrieved_docs:
+            #     source = {
+            #         "content": doc.page_content[:200] + "...",  # First 200 chars
+            #         "metadata": doc.metadata
+            #     }
             for doc in retrieved_docs:
-                source = {
-                    "content": doc.page_content[:200] + "...",  # First 200 chars
-                    "metadata": doc.metadata
-                }
-                result["sources"].append(source)
+               source = {
+                  "file": doc.metadata.get("source", "Unknown"),
+                  "title": doc.metadata.get("title", ""),
+                  "chunk_id": doc.metadata.get("chunk_id"),
+                  
+                   }
+               result["sources"].append(source)
 
             
             return result
@@ -547,6 +569,7 @@ class PDFProcessor:
         except Exception as e:
             logging.error(f"Error in similarity search: {str(e)}")
             return {"error": str(e)}
+            
 
 
 processor = PDFProcessor()
@@ -603,7 +626,7 @@ def interactive_qa():
         if user_input:
             try:
                 # Get answer
-                result = processor.ask_question(user_input, model_name=current_model)
+                result =  processor.ask_question(user_input, model_name=current_model)
 
                 # Print the response
                 print("\n=== Answer ===")

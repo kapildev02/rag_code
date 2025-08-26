@@ -18,6 +18,12 @@ from app.utils.functions import inject_image_markdown
 from app.utils.response_generator import generate_ai_response
 import markdown
 from app.data.questions import sample_question_and_answer
+import logging
+import json
+
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 """
     Create Guest Chat
@@ -226,12 +232,12 @@ async def get_user_chat(chat_id: str, user_id: str):
     Get User Chat Messages
 """
 
-
 async def get_user_chat_messages(chat_id: str, user_id: str):
     try:
         existing_chat = await chat_collection().find_one(
             {"_id": ObjectId(chat_id), "user_id": user_id}
         )
+        # print("Existing chat found:", existing_chat)
         if not existing_chat:
             raise HTTPException(status_code=404, detail="Chat not found")
 
@@ -239,36 +245,34 @@ async def get_user_chat_messages(chat_id: str, user_id: str):
             await message_collection().find({"chat_id": chat_id}).to_list(length=100)
         )
 
-        response_messages = []
-        for message in messages:
-            if message["role"] == MessageRole.assistant:
-                response_messages.append(messageEntity(message))
-            else:
-                question = sample_question_and_answer[0]
-                ai_generated_response = open(question["answer_path"], "r").read()
-                image_injected_response = inject_image_markdown(ai_generated_response)
-                html_response = markdown.markdown(
-                    image_injected_response, extensions=["extra"]
-                )
+        # print("Retrieved messages:", messages)
+        return messageListEntity(messages)
+        # response_messages = []
+        # for message in messages:
+        #     if message["role"] != MessageRole.assistant:
+        #         question = sample_question_and_answer[0]
+        #         async with aiofiles.open(question["answer_path"], "r") as f:
+        #             ai_generated_response = await f.read()
 
-                message["content"] = {
-                    "answer": html_response,
-                    "source": [
-                        {
-                            "name": "page 1",
-                            "content": html_response,
-                        },
-                        {
-                            "name": "page 2",
-                            "content": html_response,
-                        },
-                    ],
-                }
-                response_messages.append(messageEntity(message))
+        #         image_injected_response = inject_image_markdown(ai_generated_response)
+        #         html_response = markdown.markdown(
+        #             image_injected_response, extensions=["extra"]
+        #         )
 
-        return response_messages
+        #         message["content"] = {
+        #             "answer": html_response,
+        #             "source": [
+        #                 {"name": "page 1", "content": html_response},
+        #                 {"name": "page 2", "content": html_response},
+        #             ],
+        #         }
+
+        #     response_messages.append(messageEntity(message))
+        # return response_messages
+        
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
 
 
 """
@@ -296,57 +300,58 @@ async def delete_user_chat(chat_id: str, user_id: str):
 """
     Send User Message
 """
-async def send_user_message(
-    chat_id: str, user_id: str, message: SendUserMessageRequest
-):
+async def send_user_message(chat_id: str, user_id: str, message: SendUserMessageRequest):
     try:
+        # Check chat exists
         existing_chat = await chat_collection().find_one(
             {"_id": ObjectId(chat_id), "user_id": user_id}
         )
         if not existing_chat:
             raise HTTPException(status_code=404, detail="Chat not found")
 
+        # Store user message
         request_message = Message(
             chat_id=chat_id, content=message.content, role=MessageRole.user
         )
+        request_result = await message_collection().insert_one(request_message.model_dump())
+        if not request_result.inserted_id:
+            raise HTTPException(status_code=500, detail="Failed to send message")
 
-        # Call your RAG pipeline here!
-        from app.utils.pages_wise_metadata import processor  # import here or at top
-        rag_response = await processor.ask_question(message.content)
+        # Call RAG pipeline
+        from app.utils.pages_wise_metadata import processor
+        rag_response = await processor.ask_question(user_id, message.content)
 
-        # Format the answer and sources
-        answer = rag_response.get("answer", "No answer found.")
+        ai_answer = rag_response.get("answer", "No answer found.")
+        sources = rag_response.get("sources", [])
+
+        # response_message = Message(
+        #     chat_id=chat_id,
+        #     content=ai_answer.strip(),
+        #     role=MessageRole.assistant,
+        # )
+        # Store assistant response
         response_message = Message(
             chat_id=chat_id,
-            content= answer.strip(),  # Assuming answer is a string
+            content=json.dumps({"answer": ai_answer, "sources": sources}),
             role=MessageRole.assistant,
         )
-
-        request_message_result = await message_collection().insert_one(
-            request_message.model_dump()
-        )
-        if request_message_result.inserted_id is None:
+        response_result = await message_collection().insert_one(response_message.model_dump())
+        if not response_result.inserted_id:
             raise HTTPException(status_code=500, detail="Failed to send message")
 
-        response_message_result = await message_collection().insert_one(
-            response_message.model_dump()
-        )
-        if response_message_result.inserted_id is None:
-            raise HTTPException(status_code=500, detail="Failed to send message")
-
-        response_message_doc = await message_collection().find_one(
-            {"_id": response_message_result.inserted_id}
-        )
-        request_message_doc = await message_collection().find_one(
-            {"_id": request_message_result.inserted_id}
-        )
+        # Fetch both inserted messages
+        request_message_db = await message_collection().find_one({"_id": request_result.inserted_id})
+        response_message_db = await message_collection().find_one({"_id": response_result.inserted_id})
 
         return {
-            "response_message": messageEntity(response_message_doc),
-            "request_message": messageEntity(request_message_doc),
+            "response_message": messageEntity(response_message_db),
+            "request_message": messageEntity(request_message_db),
         }
+
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
 
 # async def send_user_message(
 #     chat_id: str, user_id: str, message: SendUserMessageRequest

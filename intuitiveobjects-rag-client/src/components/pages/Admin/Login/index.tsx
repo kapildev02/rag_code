@@ -1,94 +1,3 @@
-// import { useState } from "react";
-// import { useNavigate } from "react-router-dom";
-// import { TextInput } from "@/components/atoms/TextInput";
-// import { Button } from "@/components/atoms/Button/Button";
-// import { useAppDispatch } from "@/store/hooks";
-// import { orgAdminLoginApi } from "@/services/adminApi";
-// import useFormValidation from "@/hooks/useFormValidation";
-// import { validateAdminLoginForm } from "@/hooks/vaidate";
-// import toast from "react-hot-toast";
-
-// const initialLoginFormState = {
-//   email: "",
-//   password: "",
-// };
-
-// export const AdminLogin = () => {
-//   const dispatch = useAppDispatch();
-//   const navigate = useNavigate();
-
-// 	const adminLoginForm = useFormValidation(initialLoginFormState, validateAdminLoginForm);
-// 	const [loading, setLoading] = useState(false);
-
-// 	const onSubmit = async () => {
-// 		setLoading(true);
-// 		try {
-// 			const response = await dispatch(orgAdminLoginApi(adminLoginForm.values));
-// 			if (response.type === "orgAdmin/login/fulfilled") {
-// 				navigate("/admin");
-// 				toast.success("Successfully logged in!", {
-// 					duration: 3000,
-// 					position: "top-right",
-// 				});
-// 			} else {
-// 				toast.error(response.payload.response.data.message || "Login failed. Please try again.", {
-// 					duration: 3000,
-// 					position: "top-right",
-// 				});
-// 			}
-// 		} catch (err: any) {
-// 			console.log(err);
-// 		} finally {
-// 			setLoading(false);
-// 		}
-// 	};
-
-//   return (
-//     <div className="min-h-screen flex items-center justify-center bg-chat-bg">
-//       <div className="max-w-md w-full rounded-2xl border border-gray-600 shadow-md p-8">
-//         <h1 className="text-2xl text-center font-bold text-gray-400 mb-6">
-//           Admin Login
-//         </h1>
-
-// 				{/* {error && <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-4">{error}</div>} */}
-
-// 				<form
-// 					onSubmit={(e) => {
-// 						e.preventDefault();
-// 						adminLoginForm.handleSubmit(onSubmit);
-// 					}}>
-// 					<div className="mb-4">
-// 						<TextInput
-// 							label="Email"
-// 							type="email"
-// 							name="email"
-// 							value={adminLoginForm.values.email}
-// 							onChange={adminLoginForm.handleChange}
-// 							placeholder="Enter your email"
-// 							error={adminLoginForm.errors.email}
-// 						/>
-// 					</div>
-
-//           <div className="mb-6">
-//             <TextInput
-//               label="Password"
-//               type="password"
-//               name="password"
-//               value={adminLoginForm.values.password}
-//               onChange={adminLoginForm.handleChange}
-//               error={adminLoginForm.errors.password}
-//               placeholder="Enter your password"
-//             />
-//           </div>
-
-//           <Button type="submit" disabled={loading} className="w-full">
-//             {loading ? "Logging in..." : "Login"}
-//           </Button>
-//         </form>
-//       </div>
-//     </div>
-//   );
-// };
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { TextInput } from "@/components/atoms/TextInput";
@@ -162,7 +71,9 @@ export const AdminLogin = () => {
         setIsSignUp(false);
         setSignUpForm(initialSignUpFormState);
       } else {
-        toast.error("Registration failed");
+        toast.error(
+          res.payload?.response?.data?.message || "Registration failed"
+        );
       }
     } catch (err) {
       console.error(err);
@@ -188,7 +99,9 @@ export const AdminLogin = () => {
           setIsSignUp(false);
           setSignUpForm(initialSignUpFormState);
         } else {
-          toast.error("Registration failed");
+          toast.error(
+            response.payload?.response?.data?.message || "Registration failed"
+          );
         }
       } catch (err) {
         console.error(err);

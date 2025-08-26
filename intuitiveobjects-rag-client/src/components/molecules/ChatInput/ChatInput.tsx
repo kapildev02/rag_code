@@ -32,9 +32,14 @@ export const ChatInput = ({ disabled }: ChatInputProps) => {
         })
       );
       setMessage(""); // Clear the input field after sending
-      await dispatch(sendChatMessageApi({ chatId, content: message.trim() }));
-      dispatch(setLoading(false));
-      // setMessage("");
+      try {
+        await dispatch(sendChatMessageApi({ chatId, content: message.trim() }));
+      } catch (error) {
+        console.error("Error sending message:", error);
+      } finally {
+        setIsWaiting(false); //reset waiting state
+        dispatch(setLoading(false));
+      }
     }
   }, [message, disabled, chatId, dispatch]);
 

@@ -227,12 +227,12 @@ async def organization_google_drive_upload_file(
                 }
             }
         }
-        
+
         await document_collection().update_one(
             {"_id": doc_result.inserted_id},
             update_data
         )
-        
+
         updated_doc = await document_collection().find_one(
             {"_id": doc_result.inserted_id}
         )
@@ -315,7 +315,7 @@ async def organization_local_drive_upload(
                 }
             }
         }
-        
+
         await document_collection().update_one(
             {"_id": doc_result.inserted_id},
             update_data
@@ -351,13 +351,13 @@ async def organization_local_drive_upload(
                     }
                 }
             )
-            
+
             doc =  await document_collection().find_one(
                 {"_id": doc_result.inserted_id}
             )
             processed_files.append(OrganizationFileEntity(doc))    
             continue
-        
+
         await document_collection().update_one(
             {"_id": doc_result.inserted_id},
             {
@@ -391,7 +391,7 @@ async def organization_local_drive_upload(
                 "uploaded_at": datetime.now()
             }
         )
-        
+
         await document_collection().update_one(
             {"_id": doc_result.inserted_id},
             {
@@ -420,7 +420,7 @@ async def organization_local_drive_upload(
             settings.MD_FILE_CONVERSION_QUEUE,
             json.dumps(rabbitmq_job)
         )
-        
+
         await document_collection().update_one(
             {"_id": doc_result.inserted_id},
             {
@@ -439,7 +439,7 @@ async def organization_local_drive_upload(
                 }
             }
         )
-        
+
         doc = await document_collection().find_one(
             {"_id": doc_result.inserted_id}
         )

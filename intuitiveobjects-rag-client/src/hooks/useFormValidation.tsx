@@ -11,7 +11,7 @@ const useFormValidation = <T extends Record<string, any>>(
   const [values, setValues] = useState<T>(initialValues);
   const [errors, setErrors] = useState<FormErrors<T>>({});
 
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement> | React.ChangeEvent<HTMLSelectElement>) => {
     // eslint-disable-next-line no-unsafe-optional-chaining
     const { name, value, dataset } = e?.target;
 

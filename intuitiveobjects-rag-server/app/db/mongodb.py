@@ -100,7 +100,8 @@ def app_config_collection():
 
 def document_collection():
     """Get the document collection"""
-    return get_collection("documents")
+    # return get_collection("documents")
+    return get_collection("organization_files")
 
 def ingestion_status_collection():
     """Get ingestion status collection"""

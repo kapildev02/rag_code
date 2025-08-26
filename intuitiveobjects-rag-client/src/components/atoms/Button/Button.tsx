@@ -1,12 +1,14 @@
 interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: "primary" | "secondary" | "ghost";
   children: React.ReactNode;
+  as?: React.ElementType;
 }
 
 export const Button = ({
   variant = "primary",
   children,
   className = "",
+  as: Component = "button",
   ...props
 }: ButtonProps) => {
   const baseStyles =
@@ -20,11 +22,11 @@ export const Button = ({
   };
 
   return (
-    <button
+    <Component
       className={`${baseStyles} ${variantStyles[variant]} ${className}`}
       {...props}
     >
       {children}
-    </button>
+    </Component>
   );
 };

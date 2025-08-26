@@ -20,16 +20,16 @@ def reset_chroma_collection():
             model_name="all-MiniLM-L6-v2"
         )
 
-        if "document_collection" in [c.name for c in chroma_client.list_collections()]:
+        if "rag-chroma" in [c.name for c in chroma_client.list_collections()]:
             logger.info("Existing collection found. Deleting it...")
-            chroma_client.delete_collection("document_collection")
+            chroma_client.delete_collection("rag-chroma")
             logger.info("Collection deleted.")
 
         # Optionally re-init client to avoid cache issues
         chroma_client = chromadb.PersistentClient(path=PERSIST_DIRECTORY)
 
         new_collection = chroma_client.create_collection(
-            name="document_collection",
+            name="rag-chroma",
             embedding_function=embedding_function
         )
         logger.info("New collection created successfully.")
