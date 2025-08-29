@@ -44,7 +44,7 @@ class PDFProcessor:
 
         return HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
 
-    def create_metadata(self, folder_path: str, category: str, force_reprocess: bool = True) -> Iterator[Dict]:
+    def create_metadata(self, folder_path: str, category: str, tags: List[str], force_reprocess: bool = True) -> Iterator[Dict]:
         """Extract text from Markdown files in a folder and process them."""
         pages = []  # Store processed pages
 
@@ -58,6 +58,7 @@ class PDFProcessor:
             title = self._extract_section_title(batch)
             summary = self.summarize_page(batch)
             tables = self._extract_tables_from_markdown(batch)
+            metadata = self._extract_dynamic_metadata(batch, tags)
 
             page_data = {
                 'section_num': i + 1,
@@ -68,6 +69,7 @@ class PDFProcessor:
                 'source': str(md_file),
                 'format': 'markdown',
                 'tables': tables,
+                'file_metadata': metadata
             }
 
             pages.append(page_data)  # Store for caching
@@ -79,8 +81,9 @@ class PDFProcessor:
         prompt = f"""Extract the main title from the following Markdown content. 
         If there is no clear title, return the best possible inferred title.\n\n
         {markdown_content}\n\nTitle:"""
-        
+
         response = ollama.chat(model="gemma3:1b", messages=[{"role": "user", "content": prompt}])
+        print(f"Response: {response}")
         return response["message"]["content"].strip()
 
     def _extract_tables_from_markdown(self, markdown_text: str) -> List[Dict]:
@@ -97,7 +100,7 @@ class PDFProcessor:
                 'raw_content': ''.join(table_match),
                 'type': 'markdown_table'
             })
-            
+        print(f'tables: {tables}')
         return tables
         
     def summarize_page(self,content: str, is_markdown: bool = True, model_name: str = "gemma3:1b") -> str:
@@ -163,12 +166,105 @@ class PDFProcessor:
             summary = re.sub(r'\n+', ' ', summary)
             summary = re.sub(r'\s+', ' ', summary)
 
+            logging.info(f"summary >>>>>>>{summary}")
+
             return summary
 
         except Exception as e:
             logging.error(f"Error in summarization: {str(e)}")
-            return "Summary generation failed. Please check the content and try again."
-        
+            return "Summary generation failed. Please check the content and try again." 
+
+    def _extract_dynamic_metadata(self, text: str, tags: List[str], model_name: str = "gemma3:1b") -> Dict[str, str]:
+
+
+
+
+
+        # Normalize tags: if a single string contains commas, split it
+        normalized_tags = []
+        for tag in tags:
+            if "," in tag:
+                normalized_tags.extend([t.strip() for t in tag.split(",")])
+            else:
+                normalized_tags.append(tag)
+
+        tags = normalized_tags
+
+        """
+        Dynamically extract metadata from a document based on provided tags.
+
+        Args:
+            text (str): Document text
+            tags (List[str]): List of metadata fields to extract
+            model_name (str): LLM model to use
+
+        Returns:
+            dict: Extracted metadata with tags as keys
+        """
+        default_metadata = {tag: "Unknown" for tag in tags}
+
+        # Prepare tag-specific instructions
+        tag_instructions = "\n".join([
+            f"- {tag}: Extract the {tag} from the document." for tag in tags
+        ])
+
+        prompt = f"""
+        You are an intelligent enterprise document assistant.
+
+        Analyze the document and extract metadata.
+
+        Required metadata fields: {", ".join(tags)}
+
+        Guidelines:
+        - Use only information explicitly or strongly implied in the text.
+        - If a field is missing, set it to "Unknown".
+        - Names, monetary values, phone numbers must be captured accurately.
+        - Response must be valid JSON with these exact keys: {", ".join(tags)}
+
+        Metadata fields:
+        {tag_instructions}
+
+        Document:
+        {text}
+
+        JSON Response:
+        """
+
+        try:
+            response = ollama.chat(
+                model=model_name,
+                messages=[
+                    {"role": "system", "content": "You are a precise document metadata extractor. Ensure clarity, accuracy, and valid JSON output."},
+                    {"role": "user", "content": prompt}
+                ]
+            )
+
+            raw_output = response["message"]["content"].strip()
+
+            # Remove accidental markdown fencing
+            raw_output = re.sub(r"```json|```", "", raw_output).strip()
+
+            import json
+            metadata = json.loads(raw_output)
+
+            # Ensure all required fields are present
+            for tag in tags:
+                if tag not in metadata or not metadata[tag]:
+                    metadata[tag] = default_metadata[tag]
+
+            # Convert lists to comma-separated strings
+            for k, v in metadata.items():
+                if isinstance(v, list):
+                    metadata[k] = ", ".join(map(str, v))
+
+            logging.info(f"Extracted dynamic metadata: {metadata}")
+            return metadata
+
+        except Exception as e:
+            logging.error(f"Metadata extraction failed: {e}")
+            return default_metadata
+
+  
     def _generate_chunk_name(self, chunk_text: str) -> str:
         """Generate a descriptive name for a chunk."""
         header_match = re.search(r'^#{1,6}\s(.+)$', chunk_text.split('\n')[0])
@@ -204,6 +300,7 @@ class PDFProcessor:
                     'source': str(page['source']),
                     'format': str(page.get('format', 'text')),
                     'chunk_name': str(chunk_name),
+                    
                 }
 
                 # Handle file_metadata
@@ -250,7 +347,7 @@ class PDFProcessor:
             logging.error(f"Error saving to ChromaDB: {str(e)}")
             raise Exception(f"Failed to save documents to ChromaDB: {str(e)}")
 
-    async def index_pdf(self, folder_path: str, category: str, doc_id: str, user_id: str, force_reindex: bool = False): 
+    async def index_pdf(self, folder_path: str, category: str, doc_id: str, user_id: str, tags: List[str], force_reindex: bool = False): 
         print(f"Using model: {self.embedding_model} to index {folder_path}")
 
         """Process and index a PDF file by extracting, chunking, and storing embeddings.
@@ -280,7 +377,7 @@ class PDFProcessor:
 
             # Extract metadata
             try:
-                processed_pages = list(self.create_metadata(folder_path,category))
+                processed_pages = list(self.create_metadata(folder_path,category,tags))
                 if not processed_pages:
                     raise ValueError(f"No pages were processed from {folder_path}")
                 logging.info(f"Successfully extracted metadata from {len(processed_pages)} pages")
