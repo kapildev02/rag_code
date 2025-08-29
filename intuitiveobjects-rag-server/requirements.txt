@@ -41,7 +41,8 @@ fastapi==0.115.8
 fastapi-mail==1.5.0
 filelock==3.18.0
 filetype==1.2.0
-fitz==0.0.1.dev2
+# fitz==0.0.1.dev2
+PyMuPDF==1.26.1
 flatbuffers==25.2.10
 frozenlist==1.7.0
 fsspec==2025.5.1

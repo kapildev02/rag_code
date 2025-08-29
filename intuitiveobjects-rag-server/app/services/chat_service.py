@@ -1,3 +1,4 @@
+from datetime import datetime
 from app.schema.chat_schema import (
     CreateGuestChatRequest,
     SendGuestMessageRequest,
@@ -12,6 +13,12 @@ from fastapi import HTTPException
 from app.serializers.chat_serializers import chatEntity, chatListEntity
 from app.models.message_model import Message, MessageRole
 from app.db.mongodb import message_collection
+
+
+from app.db.mongodb import user_query_collection
+from app.utils.llm import expand_user_query
+
+
 from app.serializers.message_serializers import messageListEntity, messageEntity
 from bson.objectid import ObjectId
 from app.utils.functions import inject_image_markdown
@@ -300,6 +307,59 @@ async def delete_user_chat(chat_id: str, user_id: str):
 """
     Send User Message
 """
+
+# async def send_user_message(chat_id: str, user_id: str, message: SendUserMessageRequest):
+#     try:
+#         # Check chat exists
+#         existing_chat = await chat_collection().find_one(
+#             {"_id": ObjectId(chat_id), "user_id": user_id}
+#         )
+#         if not existing_chat:
+#             raise HTTPException(status_code=404, detail="Chat not found")
+
+#         # Store user message
+#         request_message = Message(
+#             chat_id=chat_id, content=message.content, role=MessageRole.user
+#         )
+#         request_result = await message_collection().insert_one(request_message.model_dump())
+#         if not request_result.inserted_id:
+#             raise HTTPException(status_code=500, detail="Failed to send message")
+
+#         # Call RAG pipeline
+#         from app.utils.pages_wise_metadata import processor
+#         rag_response = await processor.ask_question(user_id, message.content)
+
+#         ai_answer = rag_response.get("answer", "No answer found.")
+#         sources = rag_response.get("sources", [])
+
+#         response_message = Message(
+#             chat_id=chat_id,
+#             content=ai_answer.strip(),
+#             role=MessageRole.assistant,
+#         )
+#         # Store assistant response
+#         # response_message = Message(
+#         #     chat_id=chat_id,
+#         #     content=json.dumps({"answer": ai_answer, "sources": sources}),
+#         #     role=MessageRole.assistant,
+#         # )
+#         response_result = await message_collection().insert_one(response_message.model_dump())
+#         if not response_result.inserted_id:
+#             raise HTTPException(status_code=500, detail="Failed to send message")
+
+#         # Fetch both inserted messages
+#         request_message_db = await message_collection().find_one({"_id": request_result.inserted_id})
+#         response_message_db = await message_collection().find_one({"_id": response_result.inserted_id})
+
+#         return {
+#             "response_message": messageEntity(response_message_db),
+#             "request_message": messageEntity(request_message_db),
+#         }
+
+#     except Exception as e:
+#         raise HTTPException(status_code=500, detail=str(e))
+
+
 async def send_user_message(chat_id: str, user_id: str, message: SendUserMessageRequest):
     try:
         # Check chat exists
@@ -317,27 +377,49 @@ async def send_user_message(chat_id: str, user_id: str, message: SendUserMessage
         if not request_result.inserted_id:
             raise HTTPException(status_code=500, detail="Failed to send message")
 
-        # Call RAG pipeline
+        # Fetch last two conversation entries from user_query_collection
+        user_queries = await user_query_collection().find(
+            {"chat_id": chat_id}
+        ).sort("created_at", -1).to_list(length=2)
+
+        if not user_queries:
+            expanded_query = message.content
+        else:
+            conversation = [{"role": "user", "content": q["content"]} for q in user_queries]
+            expanded_query = await expand_user_query(conversation, message.content)
+
+        # Store expanded query in user_query_collection
+        expanded_message = Message(
+            chat_id=chat_id, content=expanded_query, role=MessageRole.user ,created_at=datetime.utcnow(), updated_at=datetime.utcnow()
+        )
+        await user_query_collection().insert_one(expanded_message.model_dump())
+
+        # Call RAG pipeline with expanded query
         from app.utils.pages_wise_metadata import processor
-        rag_response = await processor.ask_question(user_id, message.content)
+        rag_response = await processor.ask_question(user_id, expanded_query)
 
         ai_answer = rag_response.get("answer", "No answer found.")
         sources = rag_response.get("sources", [])
 
-        # response_message = Message(
-        #     chat_id=chat_id,
-        #     content=ai_answer.strip(),
-        #     role=MessageRole.assistant,
-        # )
-        # Store assistant response
+        # Store assistant response in message_collection
         response_message = Message(
             chat_id=chat_id,
-            content=json.dumps({"answer": ai_answer, "sources": sources}),
+            content=ai_answer.strip(),
             role=MessageRole.assistant,
         )
         response_result = await message_collection().insert_one(response_message.model_dump())
         if not response_result.inserted_id:
             raise HTTPException(status_code=500, detail="Failed to send message")
+
+        # Store assistant response in user_query_collection
+        assistant_message = Message(
+            chat_id=chat_id,
+            content=ai_answer.strip(),
+            role=MessageRole.assistant,
+            created_at=datetime.utcnow(),
+            updated_at=datetime.utcnow()
+        )
+        await user_query_collection().insert_one(assistant_message.model_dump())
 
         # Fetch both inserted messages
         request_message_db = await message_collection().find_one({"_id": request_result.inserted_id})
@@ -352,8 +434,7 @@ async def send_user_message(chat_id: str, user_id: str, message: SendUserMessage
         raise HTTPException(status_code=500, detail=str(e))
 
 
-
-# async def send_user_message(
+# # async def send_user_message(
 #     chat_id: str, user_id: str, message: SendUserMessageRequest
 # ):
 #     try:

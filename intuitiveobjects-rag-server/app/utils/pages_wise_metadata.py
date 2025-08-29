@@ -518,6 +518,7 @@ class PDFProcessor:
                 "sources": []
             }
             
+            logging.info(f"Answer: {result['answer']}")
             # Add source information
             # for doc in retrieved_docs:
             #     source = {
