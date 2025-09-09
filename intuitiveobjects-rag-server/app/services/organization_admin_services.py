@@ -222,6 +222,30 @@ async def get_categories(user_id: str):
 
     return CategoryListEntity(categories)
 
+async def get_category_name(category_id: str, user_id: str):
+    existing_user = await organization_admin_collection().find_one(
+        {"_id": ObjectId(user_id)}
+    )
+
+    if not existing_user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    organization_id = existing_user["organization_id"]
+
+    existing_organization = await organization_collection().find_one(
+        {"_id": ObjectId(organization_id)}
+    )
+
+    if not existing_organization:
+        raise HTTPException(status_code=404, detail="Organization not found")
+
+    category = await category_collection().find_one({"_id": ObjectId(category_id), "organization_id": organization_id})
+
+    if not category:
+        raise HTTPException(status_code=404, detail="Category not found")
+
+    return CategoryEntity(category)
+
 
 async def update_category(
     category_id: str, category: UpdateCategorySchema, user_id: str

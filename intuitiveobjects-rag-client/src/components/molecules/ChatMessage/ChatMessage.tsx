@@ -39,11 +39,12 @@
 
 interface ChatMessageProps {
   content: string | object;
+  sources: Array<{ file: string; }>;
   role: "user" | "assistant";
   timestamp?: string;
 }
 
-export const ChatMessage = ({ content, role, timestamp }: ChatMessageProps) => {
+export const ChatMessage = ({ content, sources, role, timestamp }: ChatMessageProps) => {
   if (!content || (role !== "user" && role !== "assistant")) return null;
 
   const isUser = role === "user";
@@ -68,6 +69,16 @@ export const ChatMessage = ({ content, role, timestamp }: ChatMessageProps) => {
             {messageText}
           </div>
         </div>
+        {sources && sources.length > 0 && (
+          <div className="text-xs text-gray-400 mt-1">
+            Sources:
+            <ul className="list-disc list-inside">
+              {sources.map((source, index) => (
+                <li key={index}>{source.file}</li>
+              ))}
+            </ul>
+          </div>
+        )}
         {isValidTimestamp && (
           <div
             className={`text-xs text-gray-400 mt-1 ${

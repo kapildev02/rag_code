@@ -4,6 +4,7 @@ import { Loading } from "@/components/atoms/Loading/Loading";
 interface Message {
   id: string;
   content: string;
+  sources: Array<{ file: string; }>;
   role: "user" | "assistant";
   timestamp: string;
 }
@@ -25,6 +26,7 @@ export const MessageList = ({
         <ChatMessage
           key={message.id}
           content={message.content}
+          sources={message.sources}
           role={message.role}
           timestamp={message.timestamp}
         />

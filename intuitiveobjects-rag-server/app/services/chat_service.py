@@ -247,28 +247,7 @@ async def get_user_chat_messages(chat_id: str, user_id: str):
 
         # print("Retrieved messages:", messages)
         return messageListEntity(messages)
-        # response_messages = []
-        # for message in messages:
-        #     if message["role"] != MessageRole.assistant:
-        #         question = sample_question_and_answer[0]
-        #         async with aiofiles.open(question["answer_path"], "r") as f:
-        #             ai_generated_response = await f.read()
-
-        #         image_injected_response = inject_image_markdown(ai_generated_response)
-        #         html_response = markdown.markdown(
-        #             image_injected_response, extensions=["extra"]
-        #         )
-
-        #         message["content"] = {
-        #             "answer": html_response,
-        #             "source": [
-        #                 {"name": "page 1", "content": html_response},
-        #                 {"name": "page 2", "content": html_response},
-        #             ],
-        #         }
-
-        #     response_messages.append(messageEntity(message))
-        # return response_messages
+       
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -323,16 +302,12 @@ async def send_user_message(chat_id: str, user_id: str, message: SendUserMessage
 
         ai_answer = rag_response.get("answer", "No answer found.")
         sources = rag_response.get("sources", [])
-
-        # response_message = Message(
-        #     chat_id=chat_id,
-        #     content=ai_answer.strip(),
-        #     role=MessageRole.assistant,
-        # )
+        
         # Store assistant response
         response_message = Message(
             chat_id=chat_id,
-            content=json.dumps({"answer": ai_answer, "sources": sources}),
+            content=ai_answer,
+            sources=sources,
             role=MessageRole.assistant,
         )
         response_result = await message_collection().insert_one(response_message.model_dump())
@@ -350,77 +325,6 @@ async def send_user_message(chat_id: str, user_id: str, message: SendUserMessage
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
-
-
-# async def send_user_message(
-#     chat_id: str, user_id: str, message: SendUserMessageRequest
-# ):
-#     try:
-#         existing_chat = await chat_collection().find_one(
-#             {"_id": ObjectId(chat_id), "user_id": user_id}
-#         )
-#         if not existing_chat:
-#             raise HTTPException(status_code=404, detail="Chat not found")
-
-#         request_message = Message(
-#             chat_id=chat_id, content=message.content, role=MessageRole.user
-#         )
-
-#         ai_response = generate_ai_response(message.content)
-
-#         response_message = Message(
-#             chat_id=chat_id, content=ai_response, role=MessageRole.assistant
-#         )
-
-#         request_message_result = await message_collection().insert_one(
-#             request_message.model_dump()
-#         )
-
-#         if request_message_result.inserted_id is None:
-#             raise HTTPException(status_code=500, detail="Failed to send message")
-
-#         response_message_result = await message_collection().insert_one(
-#             response_message.model_dump()
-#         )
-
-#         if response_message_result.inserted_id is None:
-#             raise HTTPException(status_code=500, detail="Failed to send message")
-
-#         response_message = await message_collection().find_one(
-#             {"_id": response_message_result.inserted_id}
-#         )
-#         request_message = await message_collection().find_one(
-#             {"_id": request_message_result.inserted_id}
-#         )
-
-#         # Update the chat with the new message
-#         question = sample_question_and_answer[0]
-#         ai_generated_response = open(question["answer_path"], "r").read()
-#         image_injected_response = inject_image_markdown(ai_generated_response)
-#         html_response = markdown.markdown(image_injected_response, extensions=["extra"])
-
-#         response_message["content"] = {
-#             "answer": html_response,
-#             "source": [
-#                 {
-#                     "name": "page 1",
-#                     "content": html_response,
-#                 },
-#                 {
-#                     "name": "page 2",
-#                     "content": html_response,
-#                 },
-#             ],
-#         }
-
-#         return {
-#             "response_message": messageEntity(response_message),
-#             "request_message": messageEntity(request_message),
-#         }
-#     except Exception as e:
-#         raise HTTPException(status_code=500, detail=str(e))
-
 
 """
     Update User Chat

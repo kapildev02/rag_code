@@ -8,6 +8,9 @@ from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_core.documents import Document
 import os
 import logging
+
+logging.getLogger("chromadb").setLevel(logging.WARNING) # Suppress ChromaDB logs
+
 from langchain_community.llms import Ollama
 from langchain.chains import RetrievalQA
 from langchain_chroma import Chroma
@@ -44,34 +47,44 @@ class PDFProcessor:
 
         return HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
 
+    def get_excerpt(self,md_text: str, max_pages: int = 20) -> str:
+        """
+        Split by '## Page ' markers (if present) or fallback to 10k chars
+        """
+        pages = md_text.split("## Page ")
+        if len(pages) > 1:
+            return "\n".join(pages[: max_pages + 1])
+        return md_text[:10000]  # fallback
+
     def create_metadata(self, folder_path: str, category: str, force_reprocess: bool = True) -> Iterator[Dict]:
         """Extract text from Markdown files in a folder and process them."""
         pages = []  # Store processed pages
 
-        # List all markdown files (page_1.md, page_2.md, etc.)
+        # # List all markdown files (page_1.md, page_2.md, etc.)
         md_files = sorted(Path(folder_path).glob("*.md"))
         for i, md_file in enumerate(md_files):
             with open(md_file, "r", encoding="utf-8") as file:
                 batch = file.read()  # Read markdown content
 
-            # Extract section title, summary, and tables
-            title = self._extract_section_title(batch)
-            summary = self.summarize_page(batch)
-            tables = self._extract_tables_from_markdown(batch)
+        excerpt = self.get_excerpt(batch)
+        # Extract section title, summary, and tables
+        title = self._extract_section_title(excerpt)
+        summary = self.summarize_page(excerpt)
+        tables = self._extract_tables_from_markdown(batch)
 
-            page_data = {
-                'section_num': i + 1,
-                'category': category,
-                'title': title,
-                'text': batch,
-                'summary': summary,
-                'source': str(md_file),
-                'format': 'markdown',
-                'tables': tables,
-            }
+        page_data = {
+            'section_num': i+1,
+            'category': category,
+            'title': title,
+            'text': batch,
+            'summary': summary,
+            'source': str(md_files),
+            'format': 'markdown',
+            'tables': tables,
+        }
 
-            pages.append(page_data)  # Store for caching
-            yield page_data  # Yield processed data immediately
+        pages.append(page_data)  # Store for caching
+        yield page_data  # Yield processed data immediately
         # Cache processed pages
         self.processed_files[folder_path] = pages
 
@@ -204,6 +217,7 @@ class PDFProcessor:
                     'source': str(page['source']),
                     'format': str(page.get('format', 'text')),
                     'chunk_name': str(chunk_name),
+                    'category': str(page.get('category', 'unknown')).strip().lower(),
                 }
 
                 # Handle file_metadata
@@ -280,9 +294,11 @@ class PDFProcessor:
 
             # Extract metadata
             try:
-                processed_pages = list(self.create_metadata(folder_path,category))
+
+                processed_pages = list(self.create_metadata(folder_path, category))
                 if not processed_pages:
                     raise ValueError(f"No pages were processed from {folder_path}")
+                logging.info(f"Extracted metadata: {processed_pages}")
                 logging.info(f"Successfully extracted metadata from {len(processed_pages)} pages")
             except Exception as e:
                 raise Exception(f"Error in metadata extraction: {str(e)}")
@@ -442,34 +458,34 @@ class PDFProcessor:
    
 
     async def ask_question(self, user_id: str, question: str, model_name: str = "gemma2:2b") -> dict:
-        """
-            Ask a question and get answer from the indexed documents.
-            Args:
-                question (str): The question to ask
-                model_name (str): Name of the Ollama model to use
-            Returns:
-                dict: Contains answer and source information
-        """
-
-        # Get organization admin app config to fetch organization-specific config
-        print("Fetching organization user for user_id:", user_id)
-
-        from app.db.mongodb import organization_user_collection
-        existing_user=await organization_user_collection().find_one({"_id": ObjectId(user_id)})
-
-        organization_id = existing_user.get("organization_id")
-        print("Fetching organization users for organization_id:", organization_id)
-
-        config = await get_updated_app_config(organization_id)
-
-        model_name = config['llm_model'] if "llm_model" in config else "gemma3:1b"
-        embedding_model = config['embedding_model'] if "embedding_model" in config else "sentence-transformers/all-MiniLM-L6-v2"
-        temperature = config['temperature'] if "temperature" in config else 0.7
-
-        logging.info(f"Using model: {model_name}, temperature: {temperature}")
-        
-       
         try:
+            # Get organization admin app config to fetch organization-specific config
+            print("Fetching organization user for user_id:", user_id)
+
+            from app.db.mongodb import organization_user_collection
+            existing_user=await organization_user_collection().find_one({"_id": ObjectId(user_id)})
+
+            organization_id = existing_user.get("organization_id")
+            print("Fetching organization users for organization_id:", organization_id)
+
+            config = await get_updated_app_config(organization_id)
+
+            model_name = config['llm_model'] if "llm_model" in config else "gemma3:1b"
+            embedding_model = config['embedding_model'] if "embedding_model" in config else "sentence-transformers/all-MiniLM-L6-v2"
+            temperature = config['temperature'] if "temperature" in config else 0.7
+
+            category_id = existing_user.get("category_id", None)
+            user_category = "unknown"
+            if category_id:
+                from app.db.mongodb import category_collection
+                category_doc = await category_collection().find_one({"_id": ObjectId(category_id)})
+                if category_doc:
+                    user_category = category_doc.get("name", "unknown")
+
+            logging.info(f"Category ID: {category_id}, User Category: {user_category}")
+            logging.info(f"Using model: {model_name}, temperature: {temperature}")
+            
+           
             # Set model name
             self.llm_model_name = model_name
             
@@ -479,26 +495,61 @@ class PDFProcessor:
                 embedding_function=HuggingFaceEmbeddings(model_name=embedding_model),
                 persist_directory=self.persist_directory
             )
-            
-            # Use MMR for better retrieval
-            retrieved_docs = vectorstore.max_marginal_relevance_search(
-                question,
-                k=5,  # Number of documents to retrieve
-                fetch_k=16,  # Fetch more candidates for diversity
-                lambda_mult=0.7  # Balance between relevance and diversity
-            )
-            print("retrieved_docs_______", retrieved_docs)
-            # Build context from retrieved documents
-            context = "\n\n".join([doc.page_content for doc in retrieved_docs])
 
-            print("context ",context)
+            all_docs = vectorstore.similarity_search("test", k=100)
+            logging.info(f"All document categories: {set([doc.metadata.get('category') for doc in all_docs])}")
+
+            # Log the category we're filtering for
+            logging.info(f"Filtering for category: {user_category.strip().lower()}")
             
+            # First try category-specific search
+            try:
+                retrieved_docs = vectorstore.max_marginal_relevance_search(
+                    question,
+                    k=5,
+                    fetch_k=16,
+                    lambda_mult=0.7,
+                    filter={"category": user_category.strip().lower()}
+                )
+            except Exception as filter_error:
+                logging.warning(f"Error with filtered search: {str(filter_error)}")
+                # Fallback to unfiltered search
+                retrieved_docs = vectorstore.max_marginal_relevance_search(
+                    question,
+                    k=5,
+                    fetch_k=16,
+                    lambda_mult=0.7
+                )
+
+            if not retrieved_docs:
+                return {
+                    "answer": "I couldn't find any relevant information to answer your question in the available documents.",
+                    "sources": []
+                }
+
+            # Build context with better error handling
+            try:
+                context_parts = []
+                for doc in retrieved_docs:
+                    if doc and hasattr(doc, 'page_content'):
+                        context_parts.append(doc.page_content)
+                context = "\n\n".join(context_parts) if context_parts else ""
+            except Exception as context_error:
+                logging.error(f"Error building context: {str(context_error)}")
+                context = ""
+
+            if not context:
+                return {
+                    "answer": "Sorry, I encountered an issue processing the relevant documents.",
+                    "sources": []
+                }
+
             # Create prompt with context
             prompt = f"""
             Answer the question based on the following context:
             
             Context:
-            {retrieved_docs}
+            {context}
             
             Question: {question}
             
@@ -512,32 +563,34 @@ class PDFProcessor:
                 options={"temperature": temperature}
             )
             
-            # Format the response
+        
+        #     # Format the response
             result = {
                 "answer": response.get("message", {}).get("content", "").strip(),
                 "sources": []
             }
             
-            # Add source information
-            # for doc in retrieved_docs:
-            #     source = {
-            #         "content": doc.page_content[:200] + "...",  # First 200 chars
-            #         "metadata": doc.metadata
-            #     }
+        #     # Add source information
             for doc in retrieved_docs:
-               source = {
-                  "file": doc.metadata.get("source", "Unknown"),
-                  "title": doc.metadata.get("title", ""),
-                  "chunk_id": doc.metadata.get("chunk_id"),
-                  
-                   }
-               result["sources"].append(source)
+                source = {
+                    "file": doc.metadata.get("source", "Unknown").split("/")[-1],  # just filename
+                    # "title": doc.metadata.get("title", "").replace("**", "").replace("\n", " ").strip(),
+                    # "content": doc.page_content[:200] + "...",  # First 200 chars
+                    # "metadata": doc.metadata
+                }
+                result["sources"].append(source)
 
             
             return result
+
+             
         except Exception as e:
             logging.error(f"Error in question answering: {str(e)}")
-            return {"error": str(e)}
+            return {
+                "answer": "I apologize, but I encountered an error while processing your question. Please try again.",
+                "sources": [],
+                "error": str(e)
+            }
 
     def search_similar(self, query: str, n_results: int = 3):
         """
@@ -573,6 +626,7 @@ class PDFProcessor:
 
 
 processor = PDFProcessor()
+
 
 def interactive_qa():
     print("\n=== Interactive Q&A System ===")
@@ -626,7 +680,7 @@ def interactive_qa():
         if user_input:
             try:
                 # Get answer
-                result =  processor.ask_question(user_input, model_name=current_model)
+                result = processor.ask_question(user_input, model_name=current_model)
 
                 # Print the response
                 print("\n=== Answer ===")
