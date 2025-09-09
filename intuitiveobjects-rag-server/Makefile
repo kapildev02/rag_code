@@ -11,7 +11,7 @@ install:
 
 # Run the FastAPI server
 run:
-	$(VENV_ACTIVATE) && uvicorn app.main:socket_app --host 0.0.0.0 --port 8000 --reload
+	$(VENV_ACTIVATE) && uvicorn app.main:socket_app --host 0.0.0.0 --port 8080 --reload
 
 # Check installed dependencies
 deps:

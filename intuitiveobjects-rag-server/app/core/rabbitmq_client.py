@@ -73,3 +73,4 @@ rabbitmq_client = AsyncRabbitMQClient(
     username=settings.RABBITMQ_USERNAME,
     password=settings.RABBITMQ_PASSWORD,
 )
+

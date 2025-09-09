@@ -374,6 +374,7 @@ async def send_user_message(chat_id: str, user_id: str, message: SendUserMessage
             chat_id=chat_id, content=message.content, role=MessageRole.user
         )
         request_result = await message_collection().insert_one(request_message.model_dump())
+        print(f'request result with inserted_id >>>>>>>> {request_result}')
         if not request_result.inserted_id:
             raise HTTPException(status_code=500, detail="Failed to send message")
 
@@ -384,9 +385,11 @@ async def send_user_message(chat_id: str, user_id: str, message: SendUserMessage
 
         if not user_queries:
             expanded_query = message.content
+            print(f'expanded_query without user_queries: {expanded_query}')
         else:
             conversation = [{"role": "user", "content": q["content"]} for q in user_queries]
             expanded_query = await expand_user_query(conversation, message.content)
+            print(f'expanded_query with user_queries: {expanded_query}')
 
         # Store expanded query in user_query_collection
         expanded_message = Message(
@@ -397,6 +400,7 @@ async def send_user_message(chat_id: str, user_id: str, message: SendUserMessage
         # Call RAG pipeline with expanded query
         from app.utils.pages_wise_metadata import processor
         rag_response = await processor.ask_question(user_id, expanded_query)
+        print(f'rag response >>>>>>>> {rag_response}')
 
         ai_answer = rag_response.get("answer", "No answer found.")
         sources = rag_response.get("sources", [])
