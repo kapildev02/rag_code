@@ -6,14 +6,15 @@ import {
   orgResetMongoApi,
   orgDeleteFileApi,
   orgGetFilesApi,
+  orgGetCategoryNameApi,
 } from "@/services/adminApi";
 import toast from "react-hot-toast";
 
 type FileType = {
   id: string;
   filename: string;
-  tags?: string[];
-  tag?: string;
+  category_id: string;
+  category_name?: string; // Will store the fetched category name
 };
 
 type ConfirmAction = {
@@ -34,19 +35,11 @@ const AdditionalTab = () => {
   });
 
   const groupedFiles = files.reduce((acc, file) => {
-    if (Array.isArray(file.tags)) {
-      file.tags.forEach((tag: string) => {
-        if (!acc[tag]) acc[tag] = [];
-        acc[tag].push(file);
-      });
-    } else if (file.tag) {
-      const tag = file.tag;
-      if (!acc[tag]) acc[tag] = [];
-      acc[tag].push(file);
-    } else {
-      if (!acc["untagged"]) acc["untagged"] = [];
-      acc["untagged"].push(file);
+    const categoryName = file.category_name || 'Uncategorized';
+    if (!acc[categoryName]) {
+      acc[categoryName] = [];
     }
+    acc[categoryName].push(file);
     return acc;
   }, {} as Record<string, FileType[]>);
 
@@ -55,7 +48,9 @@ const AdditionalTab = () => {
       try {
         const response = await dispatch(orgGetFilesApi()).unwrap();
         if (response.success && Array.isArray(response.data)) {
-          setFiles(response.data);
+          // Fetch category names for all files
+          const filesWithCategories = await fetchCategoryNames(response.data);
+          setFiles(filesWithCategories);
         }
       } catch {
         toast.error("Failed to fetch files");
@@ -63,6 +58,35 @@ const AdditionalTab = () => {
     };
     fetchFiles();
   }, [dispatch]);
+
+  const fetchCategoryNames = async (files: FileType[]) => {
+    const uniqueCategoryIds = [...new Set(files.map((file) => file.category_id))];
+
+    try {
+      const categoryPromises = uniqueCategoryIds.map((categoryId) =>
+        dispatch(orgGetCategoryNameApi(categoryId)).unwrap()
+      );
+
+      const categoryResponses = await Promise.all(categoryPromises);
+
+      // Create a map of category_id to category name
+      const categoryMap = categoryResponses.reduce((acc, response) => {
+        if (response.success && response.data) {
+          acc[response.data.id] = response.data.name;
+        }
+        return acc;
+      }, {} as Record<string, string>);
+
+      // Update files with category names
+      return files.map((file) => ({
+        ...file,
+        category_name: categoryMap[file.category_id] || "Uncategorized",
+      }));
+    } catch (error) {
+      toast.error("Failed to fetch category names");
+      return files;
+    }
+  };
 
   const triggerReset = (type: "mongodb" | "chromadb") => {
     setConfirm({ open: true, actionType: type, input: "" });
@@ -149,8 +173,8 @@ const AdditionalTab = () => {
             className="px-3 py-2 rounded bg-white text-black border"
           >
             <option value="">Select File to Delete</option>
-            {Object.entries(groupedFiles).map(([tag, fileList]) => (
-              <optgroup key={tag} label={tag}>
+            {Object.entries(groupedFiles).map(([category, fileList]) => (
+              <optgroup key={category} label={category}>
                 {fileList.map((file) => (
                   <option key={file.id} value={file.id}>
                     {file.filename}
@@ -172,12 +196,12 @@ const AdditionalTab = () => {
       {/* File list grouped by tag */}
       <div className="mt-6">
         <h3 className="text-lg text-white font-medium">
-          Files Collection by tag
+          Files Collection by Category
         </h3>
         <div className="mt-2 space-y-4">
-          {Object.entries(groupedFiles).map(([tag, group]) => (
-            <div key={tag} className="bg-gray-800 p-4 rounded-lg text-white">
-              <div className="font-semibold mb-2">Tag: {tag}</div>
+          {Object.entries(groupedFiles).map(([category, group]) => (
+            <div key={category} className="bg-gray-800 p-4 rounded-lg text-white">
+              <div className="font-semibold mb-2">Category: {category}</div>
               <ul className="list-disc list-inside text-sm">
                 {group.map((file) => (
                   <li key={file.id}>{file.filename}</li>

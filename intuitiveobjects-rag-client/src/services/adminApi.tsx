@@ -57,7 +57,6 @@ export const orgGetAdminApi = createAsyncThunk(
   }
 );
 
-// ...existing code...
 // 1. Send OTP to admin's email for credential change
 interface SendOtpPayload {
   organizationName: string;
@@ -460,24 +459,25 @@ export const orgResetMongoApi = createAsyncThunk(
   }
 );
 
-export const orggetfilebytagApi = createAsyncThunk(
-  "org/getfilebytag",
+export const orgResetChromaApi = createAsyncThunk(
+  "org/resetChroma",
   async (_, { rejectWithValue }) => {
     try {
-      const response = await axiosAdminInstance.get(
-        "/organization-file/by-tag"
-      );
+      const response = await axiosAdminInstance.post("/admin/reset-chroma");
       return response.data;
     } catch (error) {
       return rejectWithValue(error);
     }
   }
 );
-export const orgResetChromaApi = createAsyncThunk(
-  "org/resetChroma",
-  async (_, { rejectWithValue }) => {
+
+export const orgGetCategoryNameApi = createAsyncThunk(
+  "org/getCategoryName",
+  async (id: string, { rejectWithValue }) => {
     try {
-      const response = await axiosAdminInstance.post("/admin/reset-chroma");
+      const response = await axiosAdminInstance.get(
+        `/organization-admin/category/${id}`
+      );
       return response.data;
     } catch (error) {
       return rejectWithValue(error);

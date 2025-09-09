@@ -135,6 +135,18 @@ async def get_categories(auth_data: AuthData = Depends(get_current_user)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@organization_admin_router.get("/category/{category_id}")
+async def get_category(category_id: str, auth_data: AuthData = Depends(get_current_user)):
+    try:
+        category = await organization_admin_services.get_category_name(category_id, auth_data.user_id)
+        return {
+            "message": "Category retrieved successfully",
+            "success": True,
+            "data": category,
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e)) 
+
 
 @organization_admin_router.put("/category/{category_id}")
 async def update_category(

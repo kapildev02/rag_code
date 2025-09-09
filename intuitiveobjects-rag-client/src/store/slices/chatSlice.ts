@@ -12,6 +12,7 @@ import {
 interface Message {
   id: string | null;
   content: string;
+  sources: Array<{ file: string; }>;
   role: "user" | "assistant";
   timestamp: string;
 }

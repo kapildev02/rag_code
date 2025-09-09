@@ -12,6 +12,7 @@ class MessageRole(str, Enum):
 class Message(BaseModel):
     chat_id: str
     content: str
+    sources: Optional[list] = Field(default=[])
     role: str
     rating: Optional[float] = Field(default=0.0, ge=0.0, lt=5.0)
     created_at: datetime = Field(default=datetime.now())

@@ -1,6 +1,7 @@
 from app.db.mongodb import (
     connect_to_mongodb,
     organization_file_collection,
+    category_collection,
     document_collection,
     get_fs
 )
@@ -39,7 +40,6 @@ async def get_pdf_from_gridfs(gridfs_id: str) -> bytes:
     raw_gridfs_file = await get_fs().open_download_stream(ObjectId(gridfs_id))
     raw_pdf_bytes = await raw_gridfs_file.read()
     return raw_pdf_bytes
-
 
 
 
@@ -176,48 +176,44 @@ async def on_message(task: aio_pika.IncomingMessage):
     try:
         message = json.loads(task.body.decode())
 
-        print(f"Received message: {message}")
-
         print(f"TASK: doc: {message["doc_id"]}, user: {message["user_id"]}")
 
         # doc id
         doc_id = message["doc_id"]
-        print(f"DOC ID: {doc_id}")
+        
         user_id = message["user_id"]
-        print(f"USER ID: {user_id}")
+        
 
         doc_result = await document_collection().find_one(
             ObjectId(doc_id)
         )
 
-        print(f"Document fetch result: {doc_result}")
-
         tags = doc_result.get("tags", [])
 
         if not doc_result:
             print(f"{doc_id} document not found")
-            
+
+        category_id = doc_result.get("category_id", "unknown")
+        result = await category_collection().find_one({"_id": ObjectId(category_id)})
+        category = result.get("name", "unknown")
+        print("Category :", category)
+
         fs_file_cursor = get_fs().find({
             "metadata.doc_id": doc_id, 
             "metadata.doc_type": "RAW"
         })
-        print(f"FS File Cursor: {fs_file_cursor}")
         fs_files = await fs_file_cursor.to_list(length=1)
-        print(f"FS Files: {fs_files}")
 
         if not fs_files:
             print(f"No raw file found for doc_id: {doc_id}")
             return
             
         fs_file = fs_files[0]
-        print(f"FS File: {fs_file}")
         raw_gridfs_id = fs_file["_id"]
-        print(f"Raw GridFS ID: {raw_gridfs_id}")
         original_filename = fs_file["filename"]
     
         print(f"Processing file: {original_filename}")
  
-
         await document_collection().update_one(
             {"_id": ObjectId(doc_id)},
             {
@@ -291,9 +287,8 @@ async def on_message(task: aio_pika.IncomingMessage):
         
         converted_md_files = Path(settings.MD_FILE_FOLDER_PATH) / doc_id
         print("converted_md_files", converted_md_files)
-        
-        await processor.index_pdf(converted_md_files, "Employee Data base", doc_id, user_id,tags)
-        
+
+        await processor.index_pdf(converted_md_files, category, doc_id, user_id,tags)
 
         await document_collection().update_one(
             {"_id": ObjectId(doc_id)},

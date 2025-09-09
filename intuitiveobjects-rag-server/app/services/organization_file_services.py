@@ -94,7 +94,7 @@ async def organization_delete_file(file_id: str, user_id: str):
     if not existing_organization_admin:
         raise HTTPException(status_code=404, detail="Organization admin not found")
 
-    print(file_id)
+    print("Deleting file:", file_id)
     existing_file = await organization_file_collection().find_one(
         {
             "_id": ObjectId(file_id),

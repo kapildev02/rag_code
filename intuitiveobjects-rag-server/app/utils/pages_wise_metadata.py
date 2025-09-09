@@ -1,7 +1,6 @@
 import re
 import ast
 import pickle
-
 from typing import List, Dict, Optional, Iterator
 from pathlib import Path
 import ollama
@@ -10,7 +9,10 @@ from langchain_community.vectorstores import Chroma
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_core.documents import Document
 import os
+
 import logging
+logging.getLogger("chromadb").setLevel(logging.WARNING) # Suppress ChromaDB logs
+
 from langchain_community.llms import Ollama
 from langchain.chains import RetrievalQA
 from langchain_chroma import Chroma
@@ -20,21 +22,16 @@ from app.db.mongodb import document_collection,organization_file_collection, con
 from app.core.rabbitmq_client import rabbitmq_client
 import json
 from app.core.config import settings
-
 from app.services.organization_admin_services import get_updated_app_config,get_organization_app_configs
-from app.utils.llm import KeywordExtractor
+
 from pathlib import Path
 BM25_STORE = "app/pipeline/bm25_store"
 Path(BM25_STORE).mkdir(parents=True, exist_ok=True)
+
 from sentence_transformers import CrossEncoder
 from rank_bm25 import BM25Okapi
 import nltk
 from sentence_transformers import SentenceTransformer, util
-
-# -------------------------------
-# 0. NLTK Downloads
-# -------------------------------
-
 from nltk.tokenize import sent_tokenize, word_tokenize
 from nltk.corpus import stopwords
 
@@ -45,7 +42,6 @@ nltk.download("stopwords")
 stop_words = set(stopwords.words("english"))
 
 reranker_model = CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2")
-
 
 
 # Define the directory for ChromaDB persistence
@@ -71,33 +67,43 @@ class PDFProcessor:
 
         return HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
 
+    def get_excerpt(self,md_text: str, max_pages: int = 20) -> str:
+        """
+        Split by '## Page ' markers (if present) or fallback to 10k chars
+        """
+        pages = md_text.split("## Page ")
+        if len(pages) > 1:
+            return "\n".join(pages[: max_pages + 1])
+        return md_text[:10000]  # fallback
+
     def create_metadata(self, folder_path: str, category: str, tags: List[str], force_reprocess: bool = True) -> Iterator[Dict]:
         """Extract text from Markdown files in a folder and process them."""
         pages = []  # Store processed pages
 
-        # List all markdown files (page_1.md, page_2.md, etc.)
+        # # List all markdown files (page_1.md, page_2.md, etc.)
         md_files = sorted(Path(folder_path).glob("*.md"))
         for i, md_file in enumerate(md_files):
             with open(md_file, "r", encoding="utf-8") as file:
                 batch = file.read()  # Read markdown content
 
+            excerpt = self.get_excerpt(batch)
             # Extract section title, summary, and tables
-            title = self._extract_section_title(batch)
-            summary = self.summarize_page(batch)
+            title = self._extract_section_title(excerpt)
+            summary = self.summarize_page(excerpt)
             tables = self._extract_tables_from_markdown(batch)
             metadata = self._extract_dynamic_metadata(batch, tags)
 
             page_data = {
-                'section_num': i + 1,
-                'category': category,
-                'title': title,
-                'text': batch,
-                'summary': summary,
-                'source': str(md_file),
-                'format': 'markdown',
-                'tables': tables,
-                'file_metadata': metadata
-            }
+            'section_num': i+1,
+            'category': category,
+            'title': title,
+            'text': batch,
+            'summary': summary,
+            'source': str(md_files),
+            'format': 'markdown',
+            'tables': tables,
+            'file_metadata': metadata
+        }
 
             pages.append(page_data)  # Store for caching
             yield page_data  # Yield processed data immediately
@@ -110,7 +116,7 @@ class PDFProcessor:
         {markdown_content}\n\nTitle:"""
 
         response = ollama.chat(model="gemma2:2b", messages=[{"role": "user", "content": prompt}])
-        print(f"Response: {response}")
+        # print(f"Response: {response}")
         return response["message"]["content"].strip()
 
     def _extract_tables_from_markdown(self, markdown_text: str) -> List[Dict]:
@@ -127,7 +133,7 @@ class PDFProcessor:
                 'raw_content': ''.join(table_match),
                 'type': 'markdown_table'
             })
-        print(f'tables: {tables}')
+        # print(f'tables: {tables}')
         return tables
 
     def summarize_page(self,content: str, is_markdown: bool = True, model_name: str = "gemma2:2b") -> str:
@@ -193,7 +199,7 @@ class PDFProcessor:
             summary = re.sub(r'\n+', ' ', summary)
             summary = re.sub(r'\s+', ' ', summary)
 
-            logging.info(f"summary >>>>>>>{summary}")
+            # logging.info(f"summary >>>>>>>{summary}")
 
             return summary
 
@@ -202,10 +208,6 @@ class PDFProcessor:
             return "Summary generation failed. Please check the content and try again." 
 
     def _extract_dynamic_metadata(self, text: str, tags: List[str], model_name: str = "gemma2:2b") -> Dict[str, str]:
-
-
-
-
 
         # Normalize tags: if a single string contains commas, split it
         normalized_tags = []
@@ -244,8 +246,6 @@ class PDFProcessor:
 
         Return ONLY valid JSON.
         """
-
-
         try:
             response = ollama.chat(
                 model=model_name,
@@ -273,7 +273,7 @@ class PDFProcessor:
                 if isinstance(v, list):
                     metadata[k] = ", ".join(map(str, v))
 
-            logging.info(f"Extracted dynamic metadata: {metadata}")
+            # logging.info(f"Extracted dynamic metadata: {metadata}")
             return metadata
 
         except Exception as e:
@@ -315,7 +315,7 @@ class PDFProcessor:
                     'source': str(page['source']),
                     'format': str(page.get('format', 'text')),
                     'chunk_name': str(chunk_name),
-                    
+                    'category': str(page.get('category', 'unknown')).strip().lower(),
                 }
 
                 # Handle file_metadata
@@ -347,6 +347,8 @@ class PDFProcessor:
             # Ensure the persist directory exists
             if not os.path.exists(self.persist_directory):
                 os.makedirs(self.persist_directory)
+            if not os.access(self.persist_directory, os.W_OK):
+               raise PermissionError(f"Persist directory {self.persist_directory} is not writable.")
 
             # Create new collection and add documents
             vectorstore = Chroma.from_documents(
@@ -355,6 +357,9 @@ class PDFProcessor:
                 embedding=self.embedding_model,
                 persist_directory=self.persist_directory
             )
+
+            # Persist changes to disk
+            vectorstore.persist()
 
             # Store the vectorstore reference
             self.vectorstore = vectorstore
@@ -467,10 +472,12 @@ class PDFProcessor:
 
             # Extract metadata
             try:
-                processed_pages = list(self.create_metadata(folder_path,category,tags))
+
+                processed_pages = list(self.create_metadata(folder_path, category, tags))
                 if not processed_pages:
                     raise ValueError(f"No pages were processed from {folder_path}")
-                logging.info(f"Successfully extracted metadata from {len(processed_pages)} pages")
+                # logging.info(f"Extracted metadata: {processed_pages}")
+                logging.info(f"Successfully extracted metadata from {len(processed_pages)} files")
             except Exception as e:
                 raise Exception(f"Error in metadata extraction: {str(e)}")
 
@@ -500,11 +507,6 @@ class PDFProcessor:
                     "user_id": user_id,
                 })
             )
-
-
-
-
-
             # Create chunks
             try:
                 chunks = self.create_chunks(processed_pages)
@@ -730,6 +732,15 @@ class PDFProcessor:
         embedding_model = config.get("embedding_model", "sentence-transformers/all-MiniLM-L6-v2")
         temperature = config.get("temperature", 0.7)
 
+        category_id = existing_user.get("category_id", None)
+        user_category = "unknown"
+        if category_id:
+                from app.db.mongodb import category_collection
+                category_doc = await category_collection().find_one({"_id": ObjectId(category_id)})
+                if category_doc:
+                    user_category = category_doc.get("name", "unknown")
+
+        logging.info(f"Category ID: {category_id}, User Category: {user_category}")
         logging.info(f"Using model: {model_name}, temperature: {temperature}")
 
         # keyword_extractor = KeywordExtractor()
@@ -746,12 +757,30 @@ class PDFProcessor:
                 persist_directory=self.persist_directory
             )
 
-            retrieved_docs = vectorstore.max_marginal_relevance_search(
-                question,
-                k=5,
-                fetch_k=16,
-                lambda_mult=0.7
-            )
+            all_docs = vectorstore.similarity_search("test", k=100)
+            logging.info(f"All document categories: {set([doc.metadata.get('category') for doc in all_docs])}")
+
+            # Log the category we're filtering for
+            logging.info(f"Filtering for category: {user_category.strip().lower()}")
+            
+            # First try category-specific search
+            try:
+                retrieved_docs = vectorstore.max_marginal_relevance_search(
+                    question,
+                    k=5,
+                    fetch_k=16,
+                    lambda_mult=0.7,
+                    filter={"category": user_category.strip().lower()}
+                )
+            except Exception as filter_error:
+                logging.warning(f"Error with filtered search: {str(filter_error)}")
+                # Fallback to unfiltered search
+                retrieved_docs = vectorstore.max_marginal_relevance_search(
+                    question,
+                    k=5,
+                    fetch_k=16,
+                    lambda_mult=0.7
+                )
 
             print("Retrieved docs from Chroma:", len(retrieved_docs))
 
@@ -905,22 +934,28 @@ class PDFProcessor:
                 "answer": response.get("message", {}).get("content", "").strip(),
                 "sources": []
             }
-
-            # Add source metadata for traceability
-            for chunk in ranked_chunks:
+            
+        #     # Add source information
+            for doc in retrieved_docs:
                 source = {
-                    "file": chunk["metadata"].get("source", "Unknown") if "metadata" in chunk else "BM25",
-                    "title": chunk["metadata"].get("title", "") if "metadata" in chunk else "",
-                    "chunk_id": chunk.get("chunk_id")
+                    "file": doc.metadata.get("source", "Unknown").split("/")[-1],  # just filename
+                    # "title": doc.metadata.get("title", "").replace("**", "").replace("\n", " ").strip(),
+                    # "content": doc.page_content[:200] + "...",  # First 200 chars
+                    # "metadata": doc.metadata
                 }
                 result["sources"].append(source)
 
+            
             return result
 
+             
         except Exception as e:
             logging.error(f"Error in question answering: {str(e)}")
-            return {"error": str(e)}
-
+            return {
+                "answer": "I apologize, but I encountered an error while processing your question. Please try again.",
+                "sources": [],
+                "error": str(e)
+            }
 
     def search_similar(self, query: str, n_results: int = 3):
         """
@@ -1107,7 +1142,7 @@ def interactive_qa():
         if user_input:
             try:
                 # Get answer
-                result =  processor.ask_question(user_input, model_name=current_model)
+                result = processor.ask_question(user_input, model_name=current_model)
 
                 # Print the response
                 print("\n=== Answer ===")
@@ -1128,13 +1163,3 @@ def interactive_qa():
 # Start the interactive session
 if __name__ == "__main__":
     interactive_qa()
-
-
-
-
-
-
-
-
-
-
