@@ -347,8 +347,6 @@ class PDFProcessor:
             # Ensure the persist directory exists
             if not os.path.exists(self.persist_directory):
                 os.makedirs(self.persist_directory)
-            if not os.access(self.persist_directory, os.W_OK):
-               raise PermissionError(f"Persist directory {self.persist_directory} is not writable.")
 
             # Create new collection and add documents
             vectorstore = Chroma.from_documents(
@@ -357,9 +355,6 @@ class PDFProcessor:
                 embedding=self.embedding_model,
                 persist_directory=self.persist_directory
             )
-
-            # Persist changes to disk
-            vectorstore.persist()
 
             # Store the vectorstore reference
             self.vectorstore = vectorstore
@@ -541,7 +536,7 @@ class PDFProcessor:
             try:
                 self.save_to_chroma(chunks)
                
-                logging.info(f"Successfully stored chunks in ChromaDB")
+                print("Successfully stored chunks in ChromaDB")
             except Exception as e:
                 raise Exception(f"Error saving to ChromaDB: {str(e)}")
 
@@ -774,13 +769,6 @@ class PDFProcessor:
                 )
             except Exception as filter_error:
                 logging.warning(f"Error with filtered search: {str(filter_error)}")
-                # Fallback to unfiltered search
-                retrieved_docs = vectorstore.max_marginal_relevance_search(
-                    question,
-                    k=5,
-                    fetch_k=16,
-                    lambda_mult=0.7
-                )
 
             print("Retrieved docs from Chroma:", len(retrieved_docs))
 

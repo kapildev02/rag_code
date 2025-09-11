@@ -27,6 +27,7 @@ class AsyncRabbitMQClient:
                 port=self.port,
                 login=self.username,
                 password=self.password,
+                heartbeat=120,  # default is 60
             )
             self.channel = await self.connection.channel()
             print(f"✅ Connected to RabbitMQ at {self.host}:{self.port}")

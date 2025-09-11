@@ -130,38 +130,36 @@ export const IngestionTab = () => {
       key: "tags",
       header: "Tags",
       render: (tags: string[]) => {
-        if (!tags || tags.length === 0) {
-          return <span className="text-xs text-gray-400">No tags</span>;
-        }
+      if (!tags || tags.length === 0) {
+        return <span className="text-xs text-gray-400">No tags</span>;
+      }
 
-        // Display first 3 tags and a "+X more" indicator if there are more
-        const displayLimit = 1;
-        const displayTags = tags.slice(0, displayLimit);
-        const remainingCount = Math.max(0, tags.length - displayLimit);
+      return (
+       <div className="flex flex-wrap gap-1 max-w-[220px] overflow-hidden">
+         {tags.slice(0, 2).map((tag, index) => (
+           <span
+             key={index}
+             className="px-2 py-0.5 text-xs rounded-full bg-blue-100 text-blue-800 whitespace-nowrap"
+             title={tag} // tooltip shows full tag
+           >
+            {tag}
+          </span>
+        ))}
 
-        return (
-          <div className="flex flex-wrap gap-1 max-w-[200px]">
-            {displayTags.map((tag, index) => (
-              <span
-                key={index}
-                className="px-2 py-0.5 text-xs rounded-full bg-blue-100 text-blue-800 whitespace-nowrap"
-                title={tag}
-              >
-                {tag}
-              </span>
-            ))}
-            {remainingCount > 0 && (
-              <span
-                className="px-2 py-0.5 text-xs rounded-full bg-gray-100 text-gray-700 whitespace-nowrap cursor-help"
-                title={tags.slice(displayLimit).join(", ")}
-              >
-                +{remainingCount} more
-              </span>
-            )}
-          </div>
-        );
-      },
-    },
+        {tags.length > 2 && (
+          <span
+            className="px-2 py-0.5 text-xs rounded-full bg-gray-200 text-gray-700 whitespace-nowrap cursor-help"
+            title={tags.join(", ")} // tooltip shows all tags
+          >
+            +{tags.length - 2} more
+          </span>
+        )}
+      </div>
+    );
+  },
+},
+
+
     {
       key: "created_at",
       header: "Date",
@@ -169,7 +167,7 @@ export const IngestionTab = () => {
     },
     {
       key: "updated_at",
-      header: "Date",
+      header: "Updated Date",
       render: (value: string) => formatDate(value),
     },
     {
