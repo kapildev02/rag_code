@@ -99,7 +99,7 @@ class PDFProcessor:
             'title': title,
             'text': batch,
             'summary': summary,
-            'source': str(md_files),
+            'source': str(md_file),
             'format': 'markdown',
             'tables': tables,
             'file_metadata': metadata
@@ -259,6 +259,7 @@ class PDFProcessor:
 
             # Remove accidental markdown fencing
             raw_output = re.sub(r"```json|```", "", raw_output).strip()
+            raw_output = raw_output.replace('\\','\\\\')  # Escape backslashes
 
             import json
             metadata = json.loads(raw_output)
@@ -273,7 +274,7 @@ class PDFProcessor:
                 if isinstance(v, list):
                     metadata[k] = ", ".join(map(str, v))
 
-            # logging.info(f"Extracted dynamic metadata: {metadata}")
+            logging.info(f"Extracted dynamic metadata: {metadata}")
             return metadata
 
         except Exception as e:
@@ -335,7 +336,7 @@ class PDFProcessor:
 
                 # Create Document with the processed metadata
                 documents.append(Document(page_content=chunk_text, metadata=chunk_metadata))
-        print('documents>>>>>>',documents)
+        # print('documents>>>>>>',documents)
         for doc in documents:
             print(doc.page_content)
 
@@ -403,27 +404,43 @@ class PDFProcessor:
         """
         Convert processed pages into BM25 corpus with smaller chunks.
         """
+        texts=[]
         corpus = []
         for page in processed_pages:
             text = page['text']
+            category = page.get('category', 'unknown').strip().lower()
             sentences = self.split_into_sentences(text)
             chunks = self.chunk_sentences(sentences, chunk_size, overlap)
-            corpus.extend(chunks)
-        return corpus
+            # corpus.extend(chunks)
+            for chunk in chunks:
+                # texts.append()
+                print(f"BM25 Chunk [Category: {category}] -> {chunk}...")
+            
+                texts.append(chunk)
+
+                corpus.append({
+                    "text": chunk,
+                    "category": category
+                })
+        for i, doc in enumerate(corpus):
+            print(f"Document {i} [Category: {doc['category']}] -> {doc['text']}...")
+        return texts, corpus
 
     # Build BM25 index
-    def build_bm25(self, corpus: List[str]):
-        tokenized_corpus = [word_tokenize(doc.lower()) for doc in corpus]
+    def build_bm25(self, texts: List[str]):
+        tokenized_corpus = [word_tokenize(doc.lower()) for doc in texts]
         bm25 = BM25Okapi(tokenized_corpus)
-        return bm25, corpus, tokenized_corpus
+        return bm25, texts, tokenized_corpus
 
     # Save BM25 index
-    def save_bm25_index(self, doc_id: str, bm25, corpus, save_dir: str = BM25_STORE):
+    def save_bm25_index(self, doc_id: str, bm25, texts: List[str], corpus: List[Dict], save_dir: str = BM25_STORE):
         os.makedirs(save_dir, exist_ok=True)
         file_path = os.path.join(save_dir, f"{doc_id}.pkl")
         data = {
             "bm25": bm25,
-            "corpus": corpus
+            "texts": texts,
+            'corpus': corpus
+
         }
         try:
             with open(file_path, "wb") as f:
@@ -437,22 +454,11 @@ class PDFProcessor:
 
 
 
-    async def index_pdf(self, folder_path: str, category: str, doc_id: str, user_id: str, tags: List[str], force_reindex: bool = False):
-        print(f"Using model: {self.embedding_model} to index {folder_path}")
+    async def index_pdf(self, folder_path: str, category: str, doc_id: str, user_id: str, tags: List[str], force_reindex: bool = False): 
+            #  print(f"Using model: {self.embedding_model} to index {folder_path}")
 
-        """Process and index a PDF file by extracting, chunking, and storing embeddings.
-
-    Args:
-            folder_path (str): Path to the PDF file or folder to index
-            force_reindex (bool): If True, reindex even if already indexed
-
-        Returns:
-            None
-
-        Raises:
-            FileNotFoundError: If the folder path doesn't exist
-            Exception: For other processing errors
-        """
+ 
+   
         try:
             # Validate input path
             if not os.path.exists(folder_path):
@@ -508,9 +514,7 @@ class PDFProcessor:
                 if not chunks:
                     raise ValueError(f"No chunks were created from {folder_path}")
                 logging.info(f"Successfully created {len(chunks)} chunks")
-                # # Log each chunk's metadata and a preview of its content
-                # for idx, chunk in enumerate(chunks):
-                #     logging.info(f"Chunk {idx+1}: Metadata: {chunk.metadata} | Content Preview: {chunk.page_content[:100]}...")
+
             except Exception as e:
                 raise Exception(f"Error in chunk creation: {str(e)}")
 
@@ -535,8 +539,8 @@ class PDFProcessor:
             # Save to ChromaDB
             try:
                 self.save_to_chroma(chunks)
-               
-                print("Successfully stored chunks in ChromaDB")
+
+                logging.info(f"Successfully stored chunks in ChromaDB")
             except Exception as e:
                 raise Exception(f"Error saving to ChromaDB: {str(e)}")
 
@@ -546,16 +550,11 @@ class PDFProcessor:
 
 
 
-                # 1️⃣ Create Chroma chunks
-                chunks = self.create_chunks(processed_pages)  # Uses self.chunk_size for embeddings
-
-                # # 2️⃣ Save to Chroma
-                # self.save_to_chroma(chunks)
 
                 # 3️⃣ Create BM25 corpus with smaller chunks
-                bm25_corpus = self.create_bm25_corpus(processed_pages, chunk_size=50, overlap=10)
-                bm25, corpus, tokenized_corpus = self.build_bm25(bm25_corpus)
-                self.save_bm25_index(doc_id, bm25, corpus, save_dir=BM25_STORE)
+                texts, bm25_corpus = self.create_bm25_corpus(processed_pages, chunk_size=50, overlap=10)
+                bm25, texts, tokenized_corpus = self.build_bm25(texts)
+                self.save_bm25_index(doc_id, bm25, texts, bm25_corpus, save_dir=BM25_STORE)
 
 
 
@@ -698,13 +697,8 @@ class PDFProcessor:
             if meta_match or content_match:
                 matched_chunks.append(doc)
 
-        # 4️⃣ Fallback → if nothing matched, return all chunks
-        if not matched_chunks:
-            print("⚠️ No keyword matches found — returning all chunks instead.")
-            return chunks
 
         return matched_chunks
-
 
 
 
@@ -714,65 +708,62 @@ class PDFProcessor:
         Handles both Chroma (Document objects) and BM25 (dict) results.
         """
 
-        print("Fetching organization user for user_id:", user_id)
+        # 🔹 Load embedding model
+        model = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2")
 
+        # 🔹 Get user and org info
         from app.db.mongodb import organization_user_collection
         existing_user = await organization_user_collection().find_one({"_id": ObjectId(user_id)})
         organization_id = existing_user.get("organization_id")
-        print("Fetching organization users for organization_id:", organization_id)
 
-        # 🔹 Load organization-specific config
+        # 🔹 Load org-specific config
         config = await get_updated_app_config(organization_id)
         model_name = config.get("llm_model", "qwen2.5:1.5b")
         embedding_model = config.get("embedding_model", "sentence-transformers/all-MiniLM-L6-v2")
         temperature = config.get("temperature", 0.7)
 
+        # 🔹 Get user category
         category_id = existing_user.get("category_id", None)
         user_category = "unknown"
         if category_id:
-                from app.db.mongodb import category_collection
-                category_doc = await category_collection().find_one({"_id": ObjectId(category_id)})
-                if category_doc:
-                    user_category = category_doc.get("name", "unknown")
+            from app.db.mongodb import category_collection
+            category_doc = await category_collection().find_one({"_id": ObjectId(category_id)})
+            if category_doc:
+                user_category = category_doc.get("name", "unknown")
 
         logging.info(f"Category ID: {category_id}, User Category: {user_category}")
         logging.info(f"Using model: {model_name}, temperature: {temperature}")
 
-        # keyword_extractor = KeywordExtractor()
-        # metadata_query_result = keyword_extractor.extract_keywords(question, top_n=10)
-        metadata_query_result =  [w for w in word_tokenize(question.lower()) if w not in stop_words]
-
-        print(f'metadata_query_result: {metadata_query_result}')
+        # 🔹 Extract keywords
+        metadata_query_result = [w for w in word_tokenize(question.lower()) if w not in stop_words]
+        print(f"metadata_query_result: {metadata_query_result}")
 
         try:
-            # 🔹 Retrieve docs from vectorstore
+            # === Step 1: Retrieve docs from Chroma ===
             vectorstore = Chroma(
                 collection_name="rag-chroma",
                 embedding_function=HuggingFaceEmbeddings(model_name=embedding_model),
-                persist_directory=self.persist_directory
+                persist_directory=self.persist_directory,
             )
 
             all_docs = vectorstore.similarity_search("test", k=100)
             logging.info(f"All document categories: {set([doc.metadata.get('category') for doc in all_docs])}")
 
-            # Log the category we're filtering for
-            logging.info(f"Filtering for category: {user_category.strip().lower()}")
-            
-            # First try category-specific search
             try:
                 retrieved_docs = vectorstore.max_marginal_relevance_search(
                     question,
                     k=5,
                     fetch_k=16,
                     lambda_mult=0.7,
-                    filter={"category": user_category.strip().lower()}
+                    filter={"category": user_category.strip().lower()},
                 )
             except Exception as filter_error:
                 logging.warning(f"Error with filtered search: {str(filter_error)}")
+                retrieved_docs = []
 
-            print("Retrieved docs from Chroma:", len(retrieved_docs))
+            print(f"Retrieved docs from Chroma: {len(retrieved_docs)}")
 
-            # 🔹 Filter by keywords
+            # 🔹 Keyword filtering
             filtered_chunks = self.filter_chunks_by_keywords(retrieved_docs, metadata_query_result)
 
             for i, doc in enumerate(filtered_chunks, start=1):
@@ -781,99 +772,50 @@ class PDFProcessor:
                 print("Metadata:", doc.metadata)
                 print("Content:\n", doc.page_content)
 
-            
-            # 🔹 Convert Document → dict for uniformity
             def convert_doc_to_dict(doc):
                 return {
                     "text": doc.page_content,
                     "metadata": doc.metadata,
                     "chunk_id": doc.metadata.get("chunk_id", None),
-                    "score": None  # no vector score yet
+                    "score": None,
                 }
 
             filtered_dicts = [convert_doc_to_dict(doc) for doc in filtered_chunks]
-            print(len(filtered_dicts), 'filtered_dicts>>>>>>')
-            len_filtered_dicts = len(filtered_dicts)
 
-            # print(f'Filtered chunks: {filtered_dicts}')
+            # === Step 2: Rank Chroma results ===
+            chroma_dicts = []
+            if filtered_dicts:
+                candidate_embeddings = model.encode([doc["text"] for doc in filtered_dicts], convert_to_tensor=True)
+                query_embedding = model.encode(question, convert_to_tensor=True)
 
+                cos_scores = util.cos_sim(query_embedding, candidate_embeddings)[0]
+                top_results = cos_scores.topk(k=len(filtered_dicts))
+                chroma_dicts = [filtered_dicts[idx] for idx in top_results.indices]
 
-            model = SentenceTransformer("all-MiniLM-L6-v2")
-            candidate_embeddings = model.encode(filtered_dicts, convert_to_tensor=True)
-            query_embedding = model.encode(question, convert_to_tensor=True)
+            # === Step 3: BM25 Keyword Search ===
+            candidate_chunks = run_bm25_keyword_search(metadata_query_result, user_category.strip().lower())
 
-            # Cosine similarity
-            cos_scores = util.cos_sim(query_embedding, candidate_embeddings)[0]
-            print("cos_scores", cos_scores)
-            top_results = cos_scores.topk(k = len_filtered_dicts)
-            print("top_results", top_results)
-            chroma_dicts = [filtered_dicts[idx] for idx in top_results.indices]
+            bm25_dicts = []
+            if candidate_chunks:
+                candidate_embeddings = model.encode([doc["text"] for doc in candidate_chunks], convert_to_tensor=True)
+                query_embedding = model.encode(question, convert_to_tensor=True)
 
+                cos_scores = util.cos_sim(query_embedding, candidate_embeddings)[0]
+                top_results = cos_scores.topk(k=len(candidate_chunks))
+                bm25_dicts = [candidate_chunks[idx] for idx in top_results.indices]
 
+            # === Step 4: Combine Chroma + BM25 ===
+            top_chunks = chroma_dicts + bm25_dicts
+            top_ranked_chunks = []
+            if top_chunks:
+                candidate_embeddings = model.encode([doc["text"] for doc in top_chunks], convert_to_tensor=True)
+                query_embedding = model.encode(question, convert_to_tensor=True)
 
+                cos_scores = util.cos_sim(query_embedding, candidate_embeddings)[0]
+                top_results = cos_scores.topk(k=len(top_chunks))
+                top_ranked_chunks = [top_chunks[idx] for idx in top_results.indices]
 
-            for i, idx in enumerate(top_results.indices, start=1):
-                doc = chroma_dicts[idx]
-                print(f"\n--- Top Filtered Chunk {i} ---")
-                print("ID:", doc.get("chunk_id", "N/A"))
-                print("Metadata:", doc.get("metadata", "N/A"))
-                print("Content:\n", doc.get("text", ""))
-
-
-
-            
-
-            # 🔹 Run BM25 keyword search (already dicts)
-            candidate_chunks = run_bm25_keyword_search(metadata_query_result)
-            print(f'BM25 chunks: {candidate_chunks}')
-            for i, chunk in enumerate(candidate_chunks, start=1):
-                print(f"\n--- BM25 Chunk {i} ---")
-                print("Content:\n", chunk['text'])
-
-            len_candidate_chunks = len(candidate_chunks)
-
-
-            model = SentenceTransformer("all-MiniLM-L6-v2")
-            candidate_embeddings = model.encode(candidate_chunks, convert_to_tensor=True)
-            query_embedding = model.encode(question, convert_to_tensor=True)
-
-            # Cosine similarity
-            cos_scores = util.cos_sim(query_embedding, candidate_embeddings)[0]
-            top_results = cos_scores.topk(k = len_candidate_chunks)
-
-            # Final top chunks
-            bm25_dicts = [candidate_chunks[idx] for idx in top_results.indices] 
-
-            print(f"Top BM25 chunks after re-ranking: {bm25_dicts}") 
-
-            print("Printing BM25 chunks separately:")
-
-            for i, chunk in enumerate(bm25_dicts, start=1):
-                print(f"--- BM25 Chunk {i} ---")
-                print(chunk['text'])
-
-
-            
-
-            # 🔹 Combine both sources
-            top_chunks = filtered_dicts + bm25_dicts
-
-            len_top_chunks = len(top_chunks)
-
-
-            model = SentenceTransformer("all-MiniLM-L6-v2")
-            candidate_embeddings = model.encode(top_chunks, convert_to_tensor=True)
-            query_embedding = model.encode(question, convert_to_tensor=True)
-
-            # Cosine similarity
-            cos_scores = util.cos_sim(query_embedding, candidate_embeddings)[0]
-            top_results = cos_scores.topk(k = len_top_chunks)
-
-            # Final top chunks
-            ranked_chunks = [top_chunks[idx] for idx in top_results.indices] 
-
-
-
+            # === Step 5: Format chunks into context ===
             def format_chunk_for_context(chunk: dict) -> str:
                 metadata = chunk.get("metadata", {})
                 chunk_id = chunk.get("chunk_id", "N/A")
@@ -886,17 +828,15 @@ class PDFProcessor:
                     f"[Chunk ID: {chunk_id} | Source: {source} | Title: {title} | Section: {section}]\n"
                     f"File Metadata: {file_meta}\n"
                     f"Content:\n{chunk.get('text', '')}"
-    )
+                )
 
+            if not top_ranked_chunks:
+                return {"answer": "No relevant context found.", "sources": []}
 
-
-
-            # 🔹 Create context for LLM
-            # context = "\n\n".join([chunk["text"] for chunk in ranked_chunks]) 
-
-            context = "\n\n".join([format_chunk_for_context(chunk) for chunk in ranked_chunks])
+            context = "\n\n".join([format_chunk_for_context(chunk) for chunk in top_ranked_chunks])
             print("Context for LLM:\n", context)
 
+            # === Step 6: Query Ollama ===
             prompt = f"""
             You are a helpful assistant. 
             Use BOTH the **content** and the **metadata** from the following chunks to answer the question.
@@ -910,39 +850,30 @@ class PDFProcessor:
             If the context doesn’t contain enough information, say so explicitly.
             """
 
-            # 🔹 Query Ollama
             response = ollama.chat(
                 model=model_name,
                 messages=[{"role": "user", "content": prompt}],
-                options={"temperature": temperature}
+                options={"temperature": temperature},
             )
 
-            # 🔹 Format response
             result = {
                 "answer": response.get("message", {}).get("content", "").strip(),
-                "sources": []
+                "sources": [],
             }
-            
-        #     # Add source information
+
+            # Add sources
             for doc in retrieved_docs:
-                source = {
-                    "file": doc.metadata.get("source", "Unknown").split("/")[-1],  # just filename
-                    # "title": doc.metadata.get("title", "").replace("**", "").replace("\n", " ").strip(),
-                    # "content": doc.page_content[:200] + "...",  # First 200 chars
-                    # "metadata": doc.metadata
-                }
+                source = {"file": doc.metadata.get("source", "Unknown").split("/")[-1]}
                 result["sources"].append(source)
 
-            
             return result
 
-             
         except Exception as e:
             logging.error(f"Error in question answering: {str(e)}")
             return {
                 "answer": "I apologize, but I encountered an error while processing your question. Please try again.",
                 "sources": [],
-                "error": str(e)
+                "error": str(e),
             }
 
     def search_similar(self, query: str, n_results: int = 3):
@@ -982,72 +913,54 @@ processor = PDFProcessor()
 
 
 
-def run_bm25_keyword_search(query: List[str], bm25_dir="./app/pipeline/bm25_store", top_n: int = 5) -> List[Dict]:
+
+
+
+def run_bm25_keyword_search(query: List[str], category: str, bm25_dir="./app/pipeline/bm25_store", top_n: int = 5) -> List[Dict]:
     """
     Performs BM25 keyword search across all saved indexes.
-    Returns top-N results globally across all indexes.
+    Returns top-N dicts (with text + category metadata) strictly from the requested category.
     """
-    bm25_chunks = []
-    print(f"Running BM25 keyword search for query: {query}")
+    results = []
+    print(f"Running BM25 keyword search for query: {query}, category: {category}")
+
     if not os.path.isdir(bm25_dir):
         print(f"BM25 directory not found: {bm25_dir}")
         return []
 
-    # Tokenize query (very basic split; replace with better NLP if needed)
-    # query_tokens = query.lower().split()
-
     query_tokens = [q.lower() for q in query]
 
-    # Loop through all saved BM25 indexes
     for filename in os.listdir(bm25_dir):
         if not filename.endswith(".pkl"):
             continue
 
         file_path = os.path.join(bm25_dir, filename)
-
         try:
-            # with open(file_path, "rb") as f:
-            # with open(file_path, "rb") as f:
-            #     pickle.dump({"bm25": bm25, "corpus": corpus}, f)
-
-            #     data = pickle.load(f)
-            #     bm25 = data["bm25"]
-            #     corpus = data["corpus"]
-
             with open(file_path, "rb") as f:
                 data = pickle.load(f)
                 bm25 = data["bm25"]
+                corpus = data["corpus"]  # [{text, category}, ...]
 
-                # Try to get corpus from pickle, else fallback
-                corpus = data.get("corpus") or getattr(bm25, "corpus", None)
+            # ✅ Strict filter by category
+            filtered_corpus = [c for c in corpus if c["category"] == category]
+            if not filtered_corpus:
+                continue
 
-                if corpus is None:
-                    print(f"⚠️ Skipping {filename}: no corpus found")
-                    continue
+            filtered_texts = [c["text"] for c in filtered_corpus]
 
+            # Run BM25 on filtered texts
+            top_results = bm25.get_top_n(query_tokens, filtered_texts, n=top_n)
 
-            # Run BM25 search on this corpus
-            top_results = bm25.get_top_n(query_tokens, corpus, n=top_n)
-
-            for text in top_results:
-                bm25_chunks.append({
-                    "text": text,
-                    # "source": filename  # which pickle file it came from
-                })
+            # Convert back into dicts (with category preserved)
+            for t in top_results:
+                results.append({"text": t, "metadata": {"category": category}})
 
         except Exception as e:
             print(f"Failed to process BM25 index for {filename}: {e}")
 
-    # Deduplicate & rank (BM25 already returns ranked chunks, but across files we need global selection)
-    unique_chunks = []
-    seen_texts = set()
-    for chunk in bm25_chunks:
-        if chunk["text"] not in seen_texts:
-            unique_chunks.append(chunk)
-            seen_texts.add(chunk["text"])
+    return results
 
-    # Only keep top N globally
-    return unique_chunks[:top_n]
+
 
 def rerank_results(query: str, chunks: List[Dict], top_k: int = 3) -> List[Dict]:
     """

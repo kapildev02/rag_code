@@ -363,6 +363,8 @@ async def send_user_message(chat_id: str, user_id: str, message: SendUserMessage
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+
+
 """
     Update User Chat
 """
