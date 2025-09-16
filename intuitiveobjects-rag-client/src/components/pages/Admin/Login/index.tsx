@@ -224,7 +224,7 @@ export const AdminLogin = () => {
               onChange={adminLoginForm.handleChange}
               error={adminLoginForm.errors.password}
               placeholder="Enter your password"
-              className="mt-4"
+              // className="mt-4"
             />
             <Button type="submit" disabled={loading} className="w-full mt-6">
               {loading ? "Logging in..." : "Login"}
@@ -268,7 +268,7 @@ export const AdminLogin = () => {
                   value={changeForm.email}
                   onChange={handleChangeForm}
                   placeholder="Enter your current email"
-                  className="mt-4"
+                  // className="mt-4"
                 />
                 <Button
                   onClick={handleRequestOtp}
@@ -354,7 +354,7 @@ export const AdminLogin = () => {
               value={signUpForm.email}
               onChange={handleSignUpChange}
               placeholder="Enter your email"
-              className="mt-4"
+              // className="mt-4"
             />
             <Button
               onClick={handleSignUp}

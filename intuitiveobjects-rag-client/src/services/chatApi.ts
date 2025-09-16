@@ -2,16 +2,17 @@ import api from "./api";
 import { Message } from "../types/chat";
 
 interface ChatMessage {
-  content: string;
-  role: "user" | "assistant";
-  timestamp: string;
+	content: string;
+	sources: Array<{ file: string; content?: string; category?: string }>;
+	role: "user" | "assistant";
+	timestamp: string;
 }
 
 export interface Chat {
-  id: string;
-  name: string;
-  user_id: string;
-  created_at: string;
+	id: string;
+	name: string;
+	user_id: string;
+	created_at: string;
 }
 
 export const chatApi = {

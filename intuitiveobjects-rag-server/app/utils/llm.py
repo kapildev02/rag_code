@@ -25,21 +25,26 @@ async def expand_user_query(conversation: List[Dict[str, Any]], user_question: s
         return user_question.strip()
 
     system_prompt = {
-        "role": "system",
-        "content": (
-                "You are an AI assistant that expands vague or ambiguous user queries into detailed, context-rich questions.\n"
-                "If the user query is already a clear, well-formed question (e.g., starts with 'who', 'what', 'when', 'where', 'why', or 'how'), KEEP it as-is and do not transform it into a yes/no question.\n"
-                "You MUST use all relevant information from the conversation history, including project names, entities, or details mentioned in previous user queries and assistant responses.\n"
-                "If the conversation history contains the answer to an ambiguous part of the current query (such as a project name), use it to make the expanded question specific and complete.\n"
-                "NEVER ask the user for more context if it is already present in the conversation history.\n"
-                "NEVER repeat or rephrase the user's request for clarification if you can resolve it from context.\n"
-                "ONLY use information present in the conversation history or the current query.\n"
-                "DO NOT assume or hallucinate names, entities, or facts that are not explicitly mentioned.\n"
-                "Return a single, well-formed natural language question that is as specific as possible using all available context.\n"
-                "DO NOT explain or generate paragraphs."
-            ),
-    }
-
+      "role": "system",
+     "content": (
+        "You are an AI assistant that expands vague or ambiguous user queries into detailed, context-rich questions.\n"
+        "You MUST return ONLY one expanded question in plain text. Do not return multiple questions.\n"
+        "If the user query is already a clear, well-formed question (e.g., starts with 'who', 'what', 'when', 'where', 'why', or 'how'), KEEP it as-is and do not transform it into a yes/no question.\n"
+        "You MUST use all relevant information from the conversation history, including project names, entities, or details mentioned in previous user queries and assistant responses.\n"
+        "If the conversation history contains the answer to an ambiguous part of the current query (such as a project name), use it to make the expanded question specific and complete.\n"
+        "When the query contains pronouns like 'he', 'his', 'she', 'her', 'they', or 'it', you MUST resolve them into the correct entity from the conversation history.\n"
+        "NEVER leave pronouns unresolved.\n"
+        "NEVER ask the user for more context if it is already present in the conversation history.\n"
+        "NEVER repeat or rephrase the user's request for clarification if you can resolve it from context.\n"
+        "ONLY use information present in the conversation history or the current query.\n"
+        "DO NOT assume or hallucinate names, entities, or facts that are not explicitly mentioned.\n"
+        "Return a single, well-formed natural language question that is as specific as possible using all available context.\n"
+        "DO NOT explain or generate paragraphs.\n"
+        "DO NOT include disclaimers, reasoning, or statements about missing information.\n"
+        "STRICTLY output only the expanded question text and nothing else.\n"
+        "Output Format: A single expanded question only."
+    ),
+}
     messages = [system_prompt] + conversation + [
         {"role": "user", "content": f"Expand this query into a well-formed question: '{user_question}'"}
     ]

@@ -384,9 +384,19 @@ async def get_updated_app_config(organization_id: str):
         {"organization_id": organization_id}
     )
     if not organization_app_configs:    
-        raise HTTPException(status_code=404, detail="Organization app config not found")    
-    # print("app_organization_app_configs", organization_app_configs)
-    return OrganizationAppConfigEntity(organization_app_configs)
+        raise HTTPException(status_code=404, detail="Organization app config not found")
+        config = {
+            "llm_model": "gemma3:4b",
+            "embedding_model": "sentence-transformers/all-MiniLM-L6-v2",
+            "temperature": 0.7,
+            "system_prompt": "You are a helpful assistant that helps users to answer questions based on the context provided. If you don't know the answer, just say that you don't know. Do not make up answers. Keep the answer as concise as possible.",
+            "organization_id": organization_id,
+            "created_at": datetime.utcnow(),
+            "updated_at": datetime.utcnow(),    
+        }
+        return OrganizationAppConfigEntity(config)
+    else:
+       return OrganizationAppConfigEntity(organization_app_configs)
 
 
 async def get_organization_app_configs(user_id: str):

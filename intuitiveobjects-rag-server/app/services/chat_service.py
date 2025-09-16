@@ -325,7 +325,7 @@ async def send_user_message(chat_id: str, user_id: str, message: SendUserMessage
    
         # Call RAG pipeline
         from app.utils.pages_wise_metadata import processor
-        rag_response = await processor.ask_question(user_id, message.content)
+        rag_response = await processor.ask_question(user_id, expanded_message.content)
 
         ai_answer = rag_response.get("answer", "No answer found.")
         sources = rag_response.get("sources", [])

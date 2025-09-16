@@ -12,7 +12,7 @@ import {
 interface Message {
   id: string | null;
   content: string;
-  sources: Array<{ file: string; }>;
+  sources: Array<{ file: string; content?: string; category?: string }>;
   role: "user" | "assistant";
   timestamp: string;
 }

@@ -26,11 +26,22 @@ export const UserTab = () => {
 
 	const [error, setError] = useState<string | null>(null);
 	const [loading, setLoading] = useState(false);
+	const [userCategories, setUserCategories] = useState<{[key: string]: string}>({});
 	const userForm = useFormValidation(initialUserFormState, validateUserForm);
+
 	// Clear error when form values change
 	useEffect(() => {
 		if (error) setError(null);
 	}, [userForm.values]);
+
+	// Add effect to map category names
+	useEffect(() => {
+		const categoryMap: {[key: string]: string} = {};
+		categories.forEach(cat => {
+			categoryMap[cat.id] = cat.name;
+		});
+		setUserCategories(categoryMap);
+	}, [categories]);
 
 	const onSubmit = async () => {
 		// Check if there are any validation errors by manually validating all fields
@@ -94,6 +105,7 @@ export const UserTab = () => {
 		dispatch(orgGetCategoriesApi());
 	}, []);
 
+
 	// Define columns for responsive table
 	const columns = [
 		{
@@ -102,6 +114,17 @@ export const UserTab = () => {
 			render: (value: string) => (
 				<div className="flex items-center">
 					<div className="text-sm font-medium text-gray-400 truncate max-w-[150px] sm:max-w-xs">{value}</div>
+				</div>
+			),
+		},
+		{
+			key: "category_id",
+			header: "Category",
+			render: (value: string) => (
+				<div className="flex items-center">
+					<span className="px-2 py-1 text-sm font-medium bg-primary-200 text-gray-300 rounded">
+						{userCategories[value] || "Uncategorized"}
+					</span>
 				</div>
 			),
 		},

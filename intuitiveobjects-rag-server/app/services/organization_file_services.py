@@ -287,7 +287,7 @@ async def organization_local_drive_upload(
             "file_id": None,
             "tags": tags or [],
             "hash_key": None,
-            "source_type": "GOOGLE_DRIVE",
+            "source_type": "LOCAL_DRIVE",
             "current_stage": None,
             "status_history": [],
             "created_at": datetime.now(),

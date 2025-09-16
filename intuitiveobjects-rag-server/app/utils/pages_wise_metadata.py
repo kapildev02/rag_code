@@ -337,8 +337,8 @@ class PDFProcessor:
                 # Create Document with the processed metadata
                 documents.append(Document(page_content=chunk_text, metadata=chunk_metadata))
         # print('documents>>>>>>',documents)
-        for doc in documents:
-            print(doc.page_content)
+        # for doc in documents:
+        #     print(doc.page_content)
 
         return documents
     
@@ -414,7 +414,7 @@ class PDFProcessor:
             # corpus.extend(chunks)
             for chunk in chunks:
                 # texts.append()
-                print(f"BM25 Chunk [Category: {category}] -> {chunk}...")
+                # print(f"BM25 Chunk [Category: {category}] -> {chunk}...")
             
                 texts.append(chunk)
 
@@ -422,8 +422,8 @@ class PDFProcessor:
                     "text": chunk,
                     "category": category
                 })
-        for i, doc in enumerate(corpus):
-            print(f"Document {i} [Category: {doc['category']}] -> {doc['text']}...")
+        # for i, doc in enumerate(corpus):
+        #     print(f"Document {i} [Category: {doc['category']}] -> {doc['text']}...")
         return texts, corpus
 
     # Build BM25 index
@@ -690,7 +690,7 @@ class PDFProcessor:
                 for k in keywords:
                     if k.lower() in content_text.lower():
                         content_match = True
-                        print(f"[Content Match] Keyword '{k}' found in content: {content_text[:100]}...")
+                        # print(f"[Content Match] Keyword '{k}' found in content: {content_text[:100]}...")
                         break
 
             # 3️⃣ Include chunk if match found
@@ -702,7 +702,7 @@ class PDFProcessor:
 
 
 
-    async def ask_question(self, user_id: str, question: str, model_name: str = "gemma2:2b") -> dict:
+    async def ask_question(self, user_id: str, question: str, model_name: str = "gemma3:4b") -> dict:
         """
         Ask a question and get an answer from the indexed documents.
         Handles both Chroma (Document objects) and BM25 (dict) results.
@@ -718,7 +718,7 @@ class PDFProcessor:
 
         # 🔹 Load org-specific config
         config = await get_updated_app_config(organization_id)
-        model_name = config.get("llm_model", "qwen2.5:1.5b")
+        model_name = config.get("llm_model", "gemma3:4b")
         embedding_model = config.get("embedding_model", "sentence-transformers/all-MiniLM-L6-v2")
         temperature = config.get("temperature", 0.7)
 
@@ -736,7 +736,7 @@ class PDFProcessor:
 
         # 🔹 Extract keywords
         metadata_query_result = [w for w in word_tokenize(question.lower()) if w not in stop_words]
-        print(f"metadata_query_result: {metadata_query_result}")
+        print(f"extracted keywords from user query: {metadata_query_result}")
 
         try:
             # === Step 1: Retrieve docs from Chroma ===
@@ -766,11 +766,11 @@ class PDFProcessor:
             # 🔹 Keyword filtering
             filtered_chunks = self.filter_chunks_by_keywords(retrieved_docs, metadata_query_result)
 
-            for i, doc in enumerate(filtered_chunks, start=1):
-                print(f"\n--- Matched Chunk {i} ---")
-                print("ID:", doc.id)
-                print("Metadata:", doc.metadata)
-                print("Content:\n", doc.page_content)
+            # for i, doc in enumerate(filtered_chunks, start=1):
+            #     print(f"\n--- Matched Chunk {i} ---")
+            #     print("ID:", doc.id)
+            #     print("Metadata:", doc.metadata)
+            #     print("Content:\n", doc.page_content)
 
             def convert_doc_to_dict(doc):
                 return {
@@ -814,6 +814,11 @@ class PDFProcessor:
                 cos_scores = util.cos_sim(query_embedding, candidate_embeddings)[0]
                 top_results = cos_scores.topk(k=len(top_chunks))
                 top_ranked_chunks = [top_chunks[idx] for idx in top_results.indices]
+            print(f"Total top ranked chunks to use as context: {len(top_ranked_chunks)}")
+            for i, chunk in enumerate(top_ranked_chunks, start=1):
+                print(f"\n--- Top Ranked Chunk {i} ---")
+                print("chunks ------- ",chunk)
+                
 
             # === Step 5: Format chunks into context ===
             def format_chunk_for_context(chunk: dict) -> str:
@@ -842,7 +847,7 @@ class PDFProcessor:
             Use BOTH the **content** and the **metadata** from the following chunks to answer the question.
 
             Context Chunks:
-            {context}
+             {json.dumps(context, ensure_ascii=False, indent=2)}
 
             Question: {question}
 
@@ -862,9 +867,14 @@ class PDFProcessor:
             }
 
             # Add sources
-            for doc in retrieved_docs:
-                source = {"file": doc.metadata.get("source", "Unknown").split("/")[-1]}
+            for i, doc in enumerate(retrieved_docs):
+                source = {"file": doc.metadata.get("source", "Unknown").split("/")[-1],
+                          "content": doc.page_content, 
+                          "category": doc.metadata.get("category", "unknown")   
+                          }
                 result["sources"].append(source)
+                if i == 1:
+                    break  # Only add each source once
 
             return result
 
