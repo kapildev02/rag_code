@@ -188,7 +188,7 @@ async def on_message(task: aio_pika.IncomingMessage):
             ObjectId(doc_id)
         )
 
-        tags = doc_result.get("tags", [])
+        # tags = doc_result.get("tags", [])
 
         if not doc_result:
             print(f"{doc_id} document not found")
@@ -196,7 +196,10 @@ async def on_message(task: aio_pika.IncomingMessage):
         category_id = doc_result.get("category_id", "unknown")
         result = await category_collection().find_one({"_id": ObjectId(category_id)})
         category = result.get("name", "unknown")
+        tags = result.get("tags", [])
+
         print("Category :", category)
+        print("Tags :", tags)
 
         fs_file_cursor = get_fs().find({
             "metadata.doc_id": doc_id, 

@@ -15,6 +15,7 @@ class OrganizationAdmin(BaseModel):
 
 class Category(BaseModel):
     name: str
+    tags: list[str] = Field(default_factory=list)
     organization_id: str
     created_at: datetime = Field(default=datetime.now())
     updated_at: datetime = Field(default=datetime.now())

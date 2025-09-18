@@ -14,6 +14,7 @@ import {
 import useFormValidation from "@/hooks/useFormValidation";
 import { validateAdminLoginForm } from "@/hooks/vaidate";
 import toast from "react-hot-toast";
+import { FiSettings } from "react-icons/fi";
 // // Utility to generate random password
 // function generateRandomPassword(length = 12) {
 //   const chars =
@@ -40,6 +41,8 @@ export const AdminLogin = () => {
   const [otp, setOtp] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [newEmail, setNewEmail] = useState("");
+  const [open, setOpen] = useState(false); // <-- for settings dropdown
+
   const adminLoginForm = useFormValidation(
     initialLoginFormState,
     validateAdminLoginForm
@@ -191,7 +194,29 @@ export const AdminLogin = () => {
     }
   };
   return (
-    <div className="min-h-screen flex items-center justify-center bg-chat-bg">
+    <div className="relative flex min-h-screen items-center justify-center bg-chat-bg">
+      {/* 👇 Settings Icon Top-Right */}
+      <div className="absolute top-4 right-4 z-10">
+        <button
+          onClick={() => setOpen(!open)}
+          className="text-white hover:text-gray-300"
+          aria-label="Settings"
+        >
+          <FiSettings size={24} />
+        </button>
+
+        {open && (
+          <div className="absolute right-0 mt-2 w-48 bg-gray-800 border border-gray-600 rounded-md shadow-lg">
+            <button
+              onClick={() => navigate("/login")} // Navigate to user login
+              className="block w-full px-4 py-2 text-left text-sm text-gray-200 hover:bg-gray-700"
+            >
+              Login as User
+            </button>
+          </div>
+        )}
+      </div>
+
       <div className="max-w-md w-full rounded-2xl border border-gray-600 shadow-md p-8">
         <h1 className="text-2xl text-center font-bold text-gray-400 mb-6">
           {isSignUp
@@ -379,3 +404,4 @@ export const AdminLogin = () => {
     </div>
   );
 };
+    

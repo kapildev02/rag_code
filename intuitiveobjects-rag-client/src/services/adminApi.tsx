@@ -221,6 +221,7 @@ export const localFileUploadApi = createAsyncThunk(
 
 interface CreateCategoryPayload {
   name: string;
+  tags: string[] | string;
 }
 
 export const orgCreateCategoryApi = createAsyncThunk(
@@ -229,7 +230,7 @@ export const orgCreateCategoryApi = createAsyncThunk(
     try {
       const response = await axiosAdminInstance.post(
         "organization-admin/category",
-        category
+        { name: category.name, tags: category.tags }
       );
       return response.data;
     } catch (error) {

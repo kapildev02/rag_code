@@ -20,6 +20,9 @@ from app.utils.auth import get_current_user
 from app.db.mongodb import organization_file_collection,document_collection, close_mongodb_connection
 from bson import ObjectId
 from fastapi.encoders import jsonable_encoder
+from fastapi.responses import HTMLResponse
+import markdown
+import os
 
 
 
@@ -141,3 +144,33 @@ async def disconnect(sid):
             print(f"Client disconnected: {sid} for user_id: {user_id}")
             break
     print(f"Client disconnected: {sid}")
+
+OUTPUT_MD_DIR = "output_md_files"
+
+@app.get("/files/{folder}/{filename}")
+async def get_markdown_file(folder: str, filename: str):
+    file_path = os.path.join(OUTPUT_MD_DIR, folder, filename)
+    if os.path.exists(file_path):
+        with open(file_path, "r", encoding="utf-8") as f:
+            md_content = f.read()
+        html_content = markdown.markdown(md_content)
+        # Add basic HTML structure and styling
+        full_html = f"""
+        <html>
+        <head>
+            <meta charset="utf-8">
+            <title>{filename}</title>
+            <style>
+                body {{ font-family: Arial, sans-serif; margin: 2em; }}
+                h1, h2, h3, h4, h5, h6 {{ color: #333; }}
+                pre, code {{ background: #f4f4f4; padding: 2px 4px; border-radius: 4px; }}
+                blockquote {{ color: #666; border-left: 4px solid #ccc; margin: 1em 0; padding-left: 1em; }}
+            </style>
+        </head>
+        <body>
+            {html_content}
+        </body>
+        </html>
+        """
+        return HTMLResponse(content=full_html)
+    return {"error": "File not found"}

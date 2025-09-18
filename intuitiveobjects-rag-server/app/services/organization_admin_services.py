@@ -183,6 +183,7 @@ async def create_category(category: CreateCategorySchema, user_id: str):
     if not existing_organization:
         raise HTTPException(status_code=404, detail="Organization not found")
 
+
     existing_category = await category_collection().find_one(
         {"name": category.name, "organization_id": organization_id}
     )
@@ -190,7 +191,7 @@ async def create_category(category: CreateCategorySchema, user_id: str):
     if existing_category:
         raise HTTPException(status_code=400, detail="Category already exists")
 
-    new_category = Category(name=category.name, organization_id=organization_id)
+    new_category = Category(name=category.name, tags=category.tags, organization_id=organization_id)
 
     result = await category_collection().insert_one(new_category.model_dump())
 
@@ -384,9 +385,10 @@ async def get_updated_app_config(organization_id: str):
         {"organization_id": organization_id}
     )
     if not organization_app_configs:    
-        raise HTTPException(status_code=404, detail="Organization app config not found")
+        # raise HTTPException(status_code=404, detail="Organization app config not found")
         config = {
-            "llm_model": "gemma3:4b",
+            "_id": "default_config_id",
+            "llm_model": "gemma2:2b",
             "embedding_model": "sentence-transformers/all-MiniLM-L6-v2",
             "temperature": 0.7,
             "system_prompt": "You are a helpful assistant that helps users to answer questions based on the context provided. If you don't know the answer, just say that you don't know. Do not make up answers. Keep the answer as concise as possible.",

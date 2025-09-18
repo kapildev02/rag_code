@@ -27,11 +27,14 @@ class LoginOrganizationAdminSchema(BaseModel):
 
 
 class CreateCategorySchema(BaseModel):
+    
     name: str
+    tags: list[str] | None = Field(default_factory=list)
 
 
 class UpdateCategorySchema(BaseModel):
-    name: str
+    name: str | None = Field(None)
+    tags: list[str] | None = Field(default_factory=list)
 
 class CreateOrganizationAppConfigSchema(BaseModel):
     llm_model: str

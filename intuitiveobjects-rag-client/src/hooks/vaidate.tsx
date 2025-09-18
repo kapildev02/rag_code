@@ -64,9 +64,9 @@ export const validateAdminLoginForm = (values: AdminLoginFormParams) => {
     const errors: any = {};
     if (!values.category_id) errors.category_id = "Category is required";
     if (!values.files || values.files.length === 0) errors.files = "Files are required" as any;
-    if (!values.tags || values.tags.length === 0) {
-        errors.tags = "Tags are required";
-    }
+    // if (!values.tags || values.tags.length === 0) {
+    //     errors.tags = "Tags are required";
+    // }
 
     return errors;
   };

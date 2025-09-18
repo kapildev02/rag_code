@@ -30,6 +30,7 @@ def CategoryEntity(category: Category) -> dict:
     return {
         "id": str(category["_id"]),
         "name": category["name"],
+        "tags": category.get("tags", []),
         "created_at": category["created_at"],
         "updated_at": category["updated_at"],
     }

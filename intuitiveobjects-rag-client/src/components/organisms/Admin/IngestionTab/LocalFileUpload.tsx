@@ -14,13 +14,13 @@ import Chip from "@/components/atoms/Chip";
 interface IngestionState {
   category_id: string;
   files: File[];
-  tags: string[];
+  // tags: string[];
 }
 
 const initialState: IngestionState = {
   category_id: "",
   files: [],
-  tags: [],
+  // tags: [],
 };
 
 const toastId = "upload-toast";
@@ -41,13 +41,13 @@ const LocalFileUpload = ({
 
   console.log(ingestionForm.values);
 
-  const [newTag, setNewTag] = useState("");
+  // const [newTag, setNewTag] = useState("");
 
   const isFormValid = () => {
     return (
       ingestionForm.values.category_id.trim() !== "" &&
-      ingestionForm.values.files.length > 0 &&
-      ingestionForm.values.tags.length > 0
+      ingestionForm.values.files.length > 0 
+      // ingestionForm.values.tags.length > 0
     );
   };
 
@@ -74,7 +74,7 @@ const LocalFileUpload = ({
       );
       setIsUploading(false);
       ingestionForm.onReset();
-      setNewTag("");
+      // setNewTag("");
       setTimeout(() => {
         if (fileInputRef.current) {
           fileInputRef.current.value = "";
@@ -83,29 +83,29 @@ const LocalFileUpload = ({
     }
   };
 
-  const handleAddNewTag = () => {
-    const isAlreadyInTags = ingestionForm.values.tags.find(
-      (tag: string) => tag === newTag
-    );
+  // const handleAddNewTag = () => {
+  //   const isAlreadyInTags = ingestionForm.values.tags.find(
+  //     (tag: string) => tag === newTag
+  //   );
 
-    if (isAlreadyInTags) {
-      toast.error("Tag already exists");
-      return;
-    }
+  //   if (isAlreadyInTags) {
+  //     toast.error("Tag already exists");
+  //     return;
+  //   }
 
-    ingestionForm.setValues({
-      ...ingestionForm.values,
-      tags: [...ingestionForm.values.tags, newTag],
-    });
-    setNewTag("");
-  };
+  //   ingestionForm.setValues({
+  //     ...ingestionForm.values,
+  //     tags: [...ingestionForm.values.tags, newTag],
+  //   });
+  //   setNewTag("");
+  // };
 
-  const handleRemoveTag = (tag: string) => {
-    ingestionForm.setValues({
-      ...ingestionForm.values,
-      tags: ingestionForm.values.tags.filter((t: string) => t !== tag),
-    });
-  };
+  // const handleRemoveTag = (tag: string) => {
+  //   ingestionForm.setValues({
+  //     ...ingestionForm.values,
+  //     tags: ingestionForm.values.tags.filter((t: string) => t !== tag),
+  //   });
+  // };
 
   const handleSelectFiles = (files: FileList | null) => {
     if (!files) {
@@ -265,7 +265,7 @@ const LocalFileUpload = ({
             </div>
           </div>
 
-          <div className="xl:flex flex-col sm:flex-row space-y-2 sm:space-y-0 gap-2 items-end">
+          {/* <div className="xl:flex flex-col sm:flex-row space-y-2 sm:space-y-0 gap-2 items-end">
             <div className="flex-1">
               <TextInput
                 label="Tags"
@@ -282,7 +282,7 @@ const LocalFileUpload = ({
             >
               Add Tag
             </Button>
-          </div>
+          </div> */}
         </div>
 
         {/* Display selected files */}
@@ -342,7 +342,7 @@ const LocalFileUpload = ({
           </div>
         )}
 
-        <div className="flex flex-wrap gap-2 mb-2">
+        {/* <div className="flex flex-wrap gap-2 mb-2">
           {ingestionForm.values?.tags?.map((tag: string) => (
             <Chip
               key={tag}
@@ -351,7 +351,7 @@ const LocalFileUpload = ({
               color="blue"
             />
           ))}
-        </div>
+        </div> */}
 
         <Button
           type="submit"

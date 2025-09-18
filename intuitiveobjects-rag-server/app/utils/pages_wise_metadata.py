@@ -867,14 +867,29 @@ class PDFProcessor:
             }
 
             # Add sources
-            for i, doc in enumerate(retrieved_docs):
-                source = {"file": doc.metadata.get("source", "Unknown").split("/")[-1],
-                          "content": doc.page_content, 
-                          "category": doc.metadata.get("category", "unknown")   
-                          }
-                result["sources"].append(source)
-                if i == 1:
-                    break  # Only add each source once
+            # for chunk in top_ranked_chunks[:3]:
+            #     metadata = chunk.get("metadata", {})
+            #     result["sources"].append({
+            #             "file": metadata.get("source", "Unknown").split("/")[-1],
+            #             "content": chunk.get("text", ""),
+            #             "category": metadata.get("category", "unknown"),
+
+            #     })
+            
+            for chunk in chroma_dicts[:3]:
+                metadata = chunk.get("metadata", {})
+                source_path = metadata.get("source", "Unknown")
+                file_name = source_path.split("/")[-1]
+                folder_name = source_path.split("/")[-2] if "/" in source_path else ""
+                file_url = f"/files/{folder_name}/{file_name}" if folder_name else ""
+
+                result["sources"].append({
+                   "file": file_name,
+                   "file_url": file_url,
+                   "content": chunk.get("text", ""),
+                   "category": metadata.get("category", "unknown"),
+             })
+
 
             return result
 
