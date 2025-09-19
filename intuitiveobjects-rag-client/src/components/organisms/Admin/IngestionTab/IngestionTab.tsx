@@ -126,38 +126,38 @@ export const IngestionTab = () => {
         </span>
       ),
     },
-    {
-      key: "tags",
-      header: "Tags",
-      render: (tags: string[]) => {
-      if (!tags || tags.length === 0) {
-        return <span className="text-xs text-gray-400">No tags</span>;
-      }
+//     {
+//       key: "tags",
+//       header: "Tags",
+//       render: (tags: string[]) => {
+//       if (!tags || tags.length === 0) {
+//         return <span className="text-xs text-gray-400">No tags</span>;
+//       }
 
-      return (
-       <div className="flex flex-wrap gap-1 max-w-[220px] overflow-hidden">
-         {tags.slice(0, 2).map((tag, index) => (
-           <span
-             key={index}
-             className="px-2 py-0.5 text-xs rounded-full bg-blue-100 text-blue-800 whitespace-nowrap"
-             title={tag} // tooltip shows full tag
-           >
-            {tag}
-          </span>
-        ))}
+//       return (
+//        <div className="flex flex-wrap gap-1 max-w-[220px] overflow-hidden">
+//          {tags.slice(0, 2).map((tag, index) => (
+//            <span
+//              key={index}
+//              className="px-2 py-0.5 text-xs rounded-full bg-blue-100 text-blue-800 whitespace-nowrap"
+//              title={tag} // tooltip shows full tag
+//            >
+//             {tag}
+//           </span>
+//         ))}
 
-        {tags.length > 2 && (
-          <span
-            className="px-2 py-0.5 text-xs rounded-full bg-gray-200 text-gray-700 whitespace-nowrap cursor-help"
-            title={tags.join(", ")} // tooltip shows all tags
-          >
-            +{tags.length - 2} more
-          </span>
-        )}
-      </div>
-    );
-  },
-},
+//         {tags.length > 2 && (
+//           <span
+//             className="px-2 py-0.5 text-xs rounded-full bg-gray-200 text-gray-700 whitespace-nowrap cursor-help"
+//             title={tags.join(", ")} // tooltip shows all tags
+//           >
+//             +{tags.length - 2} more
+//           </span>
+//         )}
+//       </div>
+//     );
+//   },
+// },
 
 
     {

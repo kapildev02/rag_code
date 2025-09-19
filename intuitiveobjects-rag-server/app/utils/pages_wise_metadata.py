@@ -1,4 +1,5 @@
 import re
+
 import ast
 import pickle
 from typing import List, Dict, Optional, Iterator
@@ -74,7 +75,7 @@ class PDFProcessor:
         pages = md_text.split("## Page ")
         if len(pages) > 1:
             return "\n".join(pages[: max_pages + 1])
-        return md_text[:10000]  # fallback
+        return md_text[:50000]  # fallback
 
     def create_metadata(self, folder_path: str, category: str, tags: List[str], force_reprocess: bool = True) -> Iterator[Dict]:
         """Extract text from Markdown files in a folder and process them."""
@@ -90,8 +91,8 @@ class PDFProcessor:
             # Extract section title, summary, and tables
             title = self._extract_section_title(excerpt)
             summary = self.summarize_page(excerpt)
-            tables = self._extract_tables_from_markdown(batch)
-            metadata = self._extract_dynamic_metadata(batch, tags)
+            tables = self._extract_tables_from_markdown(excerpt)
+            metadata = self._extract_dynamic_metadata(excerpt, tags)
 
             page_data = {
             'section_num': i+1,
@@ -116,7 +117,6 @@ class PDFProcessor:
         {markdown_content}\n\nTitle:"""
 
         response = ollama.chat(model="gemma2:2b", messages=[{"role": "user", "content": prompt}])
-        # print(f"Response: {response}")
         return response["message"]["content"].strip()
 
     def _extract_tables_from_markdown(self, markdown_text: str) -> List[Dict]:
@@ -133,7 +133,6 @@ class PDFProcessor:
                 'raw_content': ''.join(table_match),
                 'type': 'markdown_table'
             })
-        # print(f'tables: {tables}')
         return tables
 
     def summarize_page(self,content: str, is_markdown: bool = True, model_name: str = "gemma2:2b") -> str:
@@ -207,62 +206,74 @@ class PDFProcessor:
             logging.error(f"Error in summarization: {str(e)}")
             return "Summary generation failed. Please check the content and try again." 
 
-    def _extract_dynamic_metadata(self, text: str, tags: List[str], model_name: str = "gemma2:2b") -> Dict[str, str]:
+ 
 
-        # Normalize tags: if a single string contains commas, split it
+    def _extract_dynamic_metadata(self, text: str, tags: List[str], model_name: str = "gemma2:2b") -> Dict[str, str]:
+        """
+        Dynamically extract metadata from a document based on provided tags.
+        Returns a dict with tag names as keys.
+        """
+        # logging.info(f"Extracting metadata for tags: {tags}")
+        # Normalize tags
         normalized_tags = []
         for tag in tags:
             if "," in tag:
                 normalized_tags.extend([t.strip() for t in tag.split(",")])
             else:
                 normalized_tags.append(tag)
-
         tags = normalized_tags
 
-        """
-        Dynamically extract metadata from a document based on provided tags.
-
-        Args:
-            text (str): Document text
-            tags (List[str]): List of metadata fields to extract
-            model_name (str): LLM model to use
-
-        Returns:
-            dict: Extracted metadata with tags as keys
-        """
         default_metadata = {tag: "Unknown" for tag in tags}
 
-        # Prepare tag-specific instructions
-        tag_instructions = "\n".join([
-            f"- {tag}: Extract the {tag} from the document." for tag in tags
-        ])
+        tag_instructions = "\n".join([f'- "{tag}": Extract the {tag} from the document.' for tag in tags])
 
         prompt = f"""
-        Extract the following metadata as strict JSON with keys {tags}:
-        {tag_instructions}
+            Extract the following metadata as a strict JSON object with keys {tags}:
+            {tag_instructions}
 
-        Document:
-        {text}
+            Document:
+            {text}
 
-        Return ONLY valid JSON.
-        """
+            Return ONLY valid JSON.
+            All property names and string values MUST use double quotes (").
+            Do not include markdown code blocks or any extra text.
+            If a value is not found, use "Unknown".
+            """
+
         try:
+            # logging.info(f"Metadata extraction prompt: {prompt}")
             response = ollama.chat(
                 model=model_name,
                 messages=[
-                    {"role": "system", "content": "You are a precise document metadata extractor. Ensure clarity, accuracy, and valid JSON output."},
+                    {"role": "system", "content": "You are a precise document metadata extractor. Output only valid JSON with double quotes for all property names and string values."},
                     {"role": "user", "content": prompt}
                 ]
             )
-
+            # logging.info(f"Response: {response}")
             raw_output = response["message"]["content"].strip()
+            # logging.info(f"Raw LLM output for metadata: {raw_output}")
 
-            # Remove accidental markdown fencing
-            raw_output = re.sub(r"```json|```", "", raw_output).strip()
-            raw_output = raw_output.replace('\\','\\\\')  # Escape backslashes
+            # Remove markdown code blocks and whitespace
+            raw_output = re.sub(r"^```json|^```|```$", "", raw_output, flags=re.MULTILINE).strip()
 
-            import json
-            metadata = json.loads(raw_output)
+            # Try to fix common JSON issues
+            # 1. Replace single quotes with double quotes if no double quotes present
+            if "'" in raw_output and '"' not in raw_output:
+                raw_output = raw_output.replace("'", '"')
+            # 2. Remove trailing commas
+            raw_output = re.sub(r",(\s*[}\]])", r"\1", raw_output)
+            # 3. Remove any leading/trailing junk before/after JSON
+            json_start = raw_output.find("{")
+            json_end = raw_output.rfind("}") + 1
+            if json_start != -1 and json_end != -1:
+                raw_output = raw_output[json_start:json_end]
+
+            # Try parsing JSON
+            try:
+                metadata = json.loads(raw_output)
+            except Exception as parse_err:
+                logging.error(f"JSON parsing failed. Raw output: {raw_output}")
+                return default_metadata
 
             # Ensure all required fields are present
             for tag in tags:
@@ -280,7 +291,7 @@ class PDFProcessor:
         except Exception as e:
             logging.error(f"Metadata extraction failed: {e}")
             return default_metadata
- 
+
     def _generate_chunk_name(self, chunk_text: str) -> str:
         """Generate a descriptive name for a chunk."""
         header_match = re.search(r'^#{1,6}\s(.+)$', chunk_text.split('\n')[0])
@@ -792,6 +803,11 @@ class PDFProcessor:
                 top_results = cos_scores.topk(k=len(filtered_dicts))
                 chroma_dicts = [filtered_dicts[idx] for idx in top_results.indices]
 
+            for i, chunk in enumerate(chroma_dicts, start=1):
+                print(f"\n--- Top Chroma Chunk {i} ---")
+                print("chunks ------- ",chunk)
+                print('--------------------------chroma reranked chunks completed-------------------------')
+
             # === Step 3: BM25 Keyword Search ===
             candidate_chunks = run_bm25_keyword_search(metadata_query_result, user_category.strip().lower())
 
@@ -803,6 +819,12 @@ class PDFProcessor:
                 cos_scores = util.cos_sim(query_embedding, candidate_embeddings)[0]
                 top_results = cos_scores.topk(k=len(candidate_chunks))
                 bm25_dicts = [candidate_chunks[idx] for idx in top_results.indices]
+
+            for i, chunk in enumerate(bm25_dicts, start=1):
+                print(f"\n--- Top BM25 Chunk {i} ---")
+                print("chunks ------- ",chunk)
+                print('--------------------------bm25 reranked chunks completed-------------------------')
+
 
             # === Step 4: Combine Chroma + BM25 ===
             top_chunks = chroma_dicts + bm25_dicts
@@ -818,7 +840,7 @@ class PDFProcessor:
             for i, chunk in enumerate(top_ranked_chunks, start=1):
                 print(f"\n--- Top Ranked Chunk {i} ---")
                 print("chunks ------- ",chunk)
-                
+                print('--------------------------top ranked chunks completed-------------------------')
 
             # === Step 5: Format chunks into context ===
             def format_chunk_for_context(chunk: dict) -> str:
