@@ -76,8 +76,8 @@ export const SettingsTab = () => {
           >
             <option value="">Select LLM model</option>
             <option value="qwen2.5:1.5b">qwen2.5:1.5b</option>
-            <option value="phi3.5:latest">phi3.5:latest</option>
-            <option value="llama3.1:70b">llama3.1:70b</option>
+            <option value="phi4-mini:3.8b">phi4-mini:3.8b</option>
+            <option value="llama3.1:7b">llama3.1:7b</option>
             <option value="gemma2:2b">gemma2:2b</option>
             <option value="deepseek-coder:1.3b">deepseek-coder:1.3b</option>
             {appConfig &&

@@ -868,8 +868,8 @@ class PDFProcessor:
             You are a helpful assistant. 
             Use BOTH the **content** and the **metadata** from the following chunks to answer the question.
 
-            Context Chunks:
-             {json.dumps(context, ensure_ascii=False, indent=2)}
+            Context Chunks: 
+            {context}
 
             Question: {question}
 
@@ -889,28 +889,28 @@ class PDFProcessor:
             }
 
             # Add sources
-            # for chunk in top_ranked_chunks[:3]:
-            #     metadata = chunk.get("metadata", {})
-            #     result["sources"].append({
-            #             "file": metadata.get("source", "Unknown").split("/")[-1],
-            #             "content": chunk.get("text", ""),
-            #             "category": metadata.get("category", "unknown"),
-
-            #     })
-            
-            for chunk in chroma_dicts[:3]:
+            for chunk in top_ranked_chunks[:3]:
                 metadata = chunk.get("metadata", {})
-                source_path = metadata.get("source", "Unknown")
-                file_name = source_path.split("/")[-1]
-                folder_name = source_path.split("/")[-2] if "/" in source_path else ""
-                file_url = f"/files/{folder_name}/{file_name}" if folder_name else ""
-
                 result["sources"].append({
-                   "file": file_name,
-                   "file_url": file_url,
-                   "content": chunk.get("text", ""),
-                   "category": metadata.get("category", "unknown"),
-             })
+                        "file": metadata.get("source", "Unknown").split("/")[-1],
+                        "content": chunk.get("text", ""),
+                        "category": metadata.get("category", "unknown"),
+
+                })
+            
+            # for chunk in chroma_dicts[:3]:
+            #     metadata = chunk.get("metadata", {})
+            #     source_path = metadata.get("source", "Unknown")
+            #     file_name = source_path.split("/")[-1]
+            #     folder_name = source_path.split("/")[-2] if "/" in source_path else ""
+            #     file_url = f"/files/{folder_name}/{file_name}" if folder_name else ""
+
+            #     result["sources"].append({
+            #        "file": file_name,
+            #        "file_url": file_url,
+            #        "content": chunk.get("text", ""),
+            #        "category": metadata.get("category", "unknown"),
+            #  })
 
 
             return result
@@ -1000,7 +1000,7 @@ def run_bm25_keyword_search(query: List[str], category: str, bm25_dir="./app/pip
 
             # Convert back into dicts (with category preserved)
             for t in top_results:
-                results.append({"text": t, "metadata": {"category": category}})
+                results.append({"text": t, "metadata": {"category": category, 'source': filename}})
 
         except Exception as e:
             print(f"Failed to process BM25 index for {filename}: {e}")
