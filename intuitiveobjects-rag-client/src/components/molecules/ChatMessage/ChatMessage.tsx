@@ -1,84 +1,22 @@
-// interface ChatMessageProps {
-//   content: string | object;
-//   sources: Array<{ file: string; }>;
-//   role: "user" | "assistant";
-//   timestamp?: string;
-// }
-
-// export const ChatMessage = ({ content, sources, role, timestamp }: ChatMessageProps) => {
-//   if (!content || (role !== "user" && role !== "assistant")) return null;
-
-//   const isUser = role === "user";
-//   const bubbleStyle = isUser
-//     ? "bg-gray-300 text-gray-800 rounded-t-2xl rounded-bl-2xl ml-auto"
-//     : "bg-gray-400 text-gray-800 rounded-t-2xl rounded-br-2xl";
-
-//   const isValidTimestamp = timestamp && !isNaN(Date.parse(timestamp));
-
-//   const messageText =
-//     typeof content === "string" ? content : JSON.stringify(content, null, 2); // format JSON nicely
-
-//   return (
-//     <div className="px-4 py-2">
-//       <div className={`max-w-max ${isUser ? "ml-auto" : "mr-auto"}`}>
-//         <div className={`p-3 ${bubbleStyle}`}>
-//           <div
-//             className={`text-sm md:text-base whitespace-pre-wrap break-words ${
-//               !isUser && "typing-animation"
-//             }`}
-//           >
-//             {messageText}
-//           </div>
-//         </div>
-//         {sources && sources.length > 0 && (
-//           <div className="text-xs text-gray-400 mt-1">
-//             Sources:
-//             <ul className="list-disc list-inside">
-//               {sources.map((source, index) => (
-//                 <li key={index}>{source.file}</li>
-//               ))}
-//             </ul>
-//           </div>
-//         )}
-//         {isValidTimestamp && (
-//           <div
-//             className={`text-xs text-gray-400 mt-1 ${
-//               isUser ? "text-right" : "text-left"
-//             }`}
-//           >
-//             {new Date(timestamp).toLocaleTimeString()}
-//           </div>
-//         )}
-//       </div>
-//     </div>
-//   );
-// };
-
 import { useState } from "react";
-
 interface ChatMessageProps {
   content: string | object;
   sources: Array<{ file: string; content?: string; category?: string }>;
   role: "user" | "assistant";
   timestamp?: string;
 }
-
 export const ChatMessage = ({ content, sources, role, timestamp }: ChatMessageProps) => {
   const [selectedSource, setSelectedSource] = useState<
     { file: string; content?: string; category?: string } | null
   >(null);
-
   if (!content || (role !== "user" && role !== "assistant")) return null;
-
   const isUser = role === "user";
   const bubbleStyle = isUser
     ? "bg-gray-300 text-gray-800 rounded-t-2xl rounded-bl-2xl ml-auto"
     : "bg-gray-400 text-gray-800 rounded-t-2xl rounded-br-2xl";
-
   const isValidTimestamp = timestamp && !isNaN(Date.parse(timestamp));
   const messageText =
     typeof content === "string" ? content : JSON.stringify(content, null, 2);
-
   return (
     <div className="px-4 py-2">
       <div className={`max-w-max ${isUser ? "ml-auto" : "mr-auto"}`}>
@@ -91,7 +29,6 @@ export const ChatMessage = ({ content, sources, role, timestamp }: ChatMessagePr
             {messageText}
           </div>
         </div>
-
         {/* Sources Section */}
         {sources && sources.length > 0 && (
           <div className="text-xs text-gray-400 mt-1">
@@ -110,7 +47,6 @@ export const ChatMessage = ({ content, sources, role, timestamp }: ChatMessagePr
             </ul>
           </div>
         )}
-
         {/* Timestamp */}
         {isValidTimestamp && (
           <div
@@ -122,31 +58,37 @@ export const ChatMessage = ({ content, sources, role, timestamp }: ChatMessagePr
           </div>
         )}
       </div>
-
       {/* Modal for showing full source */}
-      {selectedSource && (
-        <div className="fixed inset-0 flex items-center justify-center bg-black bg-opacity-50">
-          <div className="bg-white text-black rounded-lg p-4 max-w-lg w-full">
-            <h2 className="text-lg font-bold mb-2">{selectedSource.file}</h2>
-            {selectedSource.content && (
-              <p className="mb-2 whitespace-pre-wrap break-words">
-                {selectedSource.content}
-              </p>
-            )}
-            {selectedSource.category && (
-              <p className="text-sm text-gray-600">
-                Category: {selectedSource.category}
-              </p>
-            )}
-            <button
-              onClick={() => setSelectedSource(null)}
-              className="mt-3 px-3 py-1 bg-gray-700 text-white rounded hover:bg-gray-900"
-            >
-              Close
-            </button>
-          </div>
-        </div>
-      )}
+{selectedSource && (
+  <div className="fixed inset-0 flex items-center justify-center bg-black bg-opacity-50 z-50">
+    <div className="bg-white text-black rounded-lg p-4 max-w-2xl w-full max-h-[80vh] flex flex-col">
+      {/* Header */}
+      <h2 className="text-lg font-bold mb-2">{selectedSource.file}</h2>
+      {/* Scrollable content */}
+      <div className="flex-1 overflow-y-auto pr-2">
+        {selectedSource.content && (
+          <p className="mb-2 whitespace-pre-wrap break-words">
+            {selectedSource.content}
+          </p>
+        )}
+        {selectedSource.category && (
+          <p className="text-sm text-gray-600">
+            Category: {selectedSource.category}
+          </p>
+        )}
+      </div>
+      {/* Footer with Close button */}
+      <div className="mt-3 text-right">
+        <button
+          onClick={() => setSelectedSource(null)}
+          className="px-3 py-1 bg-gray-700 text-white rounded hover:bg-gray-900"
+        >
+          Close
+        </button>
+      </div>
+    </div>
+  </div>
+)}
     </div>
   );
-};
+}

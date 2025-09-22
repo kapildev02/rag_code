@@ -420,6 +420,7 @@ class PDFProcessor:
         for page in processed_pages:
             text = page['text']
             category = page.get('category', 'unknown').strip().lower()
+            source = page.get('source', 'unknown').strip().lower()
             sentences = self.split_into_sentences(text)
             chunks = self.chunk_sentences(sentences, chunk_size, overlap)
             # corpus.extend(chunks)
@@ -431,7 +432,8 @@ class PDFProcessor:
 
                 corpus.append({
                     "text": chunk,
-                    "category": category
+                    "category": category,
+                    "source": source
                 })
         # for i, doc in enumerate(corpus):
         #     print(f"Document {i} [Category: {doc['category']}] -> {doc['text']}...")
@@ -445,20 +447,27 @@ class PDFProcessor:
 
     # Save BM25 index
     def save_bm25_index(self, doc_id: str, bm25, texts: List[str], corpus: List[Dict], save_dir: str = BM25_STORE):
-        os.makedirs(save_dir, exist_ok=True)
-        file_path = os.path.join(save_dir, f"{doc_id}.pkl")
-        data = {
-            "bm25": bm25,
-            "texts": texts,
-            'corpus': corpus
+            logging.info(f"Saving BM25 index for doc_id: {doc_id} at {save_dir}")
+            os.makedirs(save_dir, exist_ok=True)
+            logging.info(f"Ensured directory exists: {save_dir}")
+           
+            file_path = os.path.join(save_dir, f"bm25_index_{doc_id}.pkl")
+            logging.info(f"BM25 index file path: {file_path}")
+            data = {
+                "bm25": bm25,
+                "texts": texts,
+                'corpus': corpus
 
-        }
-        try:
-            with open(file_path, "wb") as f:
-                pickle.dump(data, f)
-            logging.info(f"BM25 index saved to {file_path}")
-        except Exception as e:
-            logging.error(f"Failed to save BM25 index: {e}")
+            }
+            logging.info(f"Prepared data for BM25 index with {len(texts)} texts and {len(corpus)} corpus entries")
+            try:
+                with open(file_path, "wb") as f:
+                    logging.info(f"Opened file {file_path} for writing BM25 index")
+                    pickle.dump(data, f)
+                    logging.info(f"BM25 index data pickled successfully")
+                logging.info(f"BM25 index saved to {file_path}")
+            except Exception as e:
+                logging.error(f"Failed to save BM25 index: {e}")
 
 
     
@@ -998,9 +1007,12 @@ def run_bm25_keyword_search(query: List[str], category: str, bm25_dir="./app/pip
             # Run BM25 on filtered texts
             top_results = bm25.get_top_n(query_tokens, filtered_texts, n=top_n)
 
-            # Convert back into dicts (with category preserved)
+            # Convert back into dicts (with category and source preserved)
             for t in top_results:
-                results.append({"text": t, "metadata": {"category": category, 'source': filename}})
+                # Find the corpus entry for this text
+                match = next((c for c in filtered_corpus if c["text"] == t), None)
+                source = match.get("source", "unknown") if match else "unknown"
+                results.append({"text": t, "metadata": {"category": category, "source": source}})
 
         except Exception as e:
             print(f"Failed to process BM25 index for {filename}: {e}")
