@@ -23,6 +23,7 @@ from fastapi.encoders import jsonable_encoder
 from fastapi.responses import HTMLResponse
 import markdown
 import os
+from app.utils.pages_wise_metadata import main
 
 
 
@@ -79,6 +80,10 @@ async def lifespan(app: FastAPI):
     await connect_to_mongodb()
     await rabbitmq_client.connect()
     await rabbitmq_client.consume_message(settings.NOTIFY_QUEUE, on_message)
+    
+    # Initialize pages-wise metadata
+    await main()
+
     yield
     await close_mongodb_connection()
 

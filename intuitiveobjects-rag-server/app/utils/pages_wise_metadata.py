@@ -1,8 +1,8 @@
 import re
-
+import asyncio
 import ast
 import pickle
-from typing import List, Dict, Optional, Iterator
+from typing import List, Dict, Optional, Iterator, AsyncIterator
 from pathlib import Path
 import ollama
 from langchain.text_splitter import RecursiveCharacterTextSplitter
@@ -10,10 +10,8 @@ from langchain_community.vectorstores import Chroma
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_core.documents import Document
 import os
-
 import logging
 logging.getLogger("chromadb").setLevel(logging.WARNING) # Suppress ChromaDB logs
-
 from langchain_community.llms import Ollama
 from langchain.chains import RetrievalQA
 from langchain_chroma import Chroma
@@ -24,30 +22,31 @@ from app.core.rabbitmq_client import rabbitmq_client
 import json
 from app.core.config import settings
 from app.services.organization_admin_services import get_updated_app_config,get_organization_app_configs
-
 from pathlib import Path
 BM25_STORE = "app/pipeline/bm25_store"
 Path(BM25_STORE).mkdir(parents=True, exist_ok=True)
-
-from sentence_transformers import CrossEncoder
+from sentence_transformers import CrossEncoder, SentenceTransformer
 from rank_bm25 import BM25Okapi
 import nltk
-from sentence_transformers import SentenceTransformer, util
+from sentence_transformers import util
 from nltk.tokenize import sent_tokenize, word_tokenize
 from nltk.corpus import stopwords
-
 nltk.download("punkt")          # sentence & word tokenization
 nltk.download("punkt_tab")      # (needed in NLTK 3.8+ for multilingual)
 nltk.download("stopwords") 
-
 stop_words = set(stopwords.words("english"))
+reranker_model = CrossEncoder(
+    "cross-encoder/ms-marco-MiniLM-L-6-v2",
+    cache_folder="./models/cross_encoder"
+)
 
-reranker_model = CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2")
-
+sentence_transformer = SentenceTransformer(
+    "sentence-transformers/all-MiniLM-L6-v2",
+    cache_folder="./models/sentence_transformer"
+)
 
 # Define the directory for ChromaDB persistence
 PERSIST_DIRECTORY = "chromadb_storage"
-
 
 class PDFProcessor:
     def __init__(self,  persist_directory=PERSIST_DIRECTORY):
@@ -63,62 +62,195 @@ class PDFProcessor:
     
     
     def _load_embedding_model(self):
-
         """Load the embedding model for vector storage."""
+        return HuggingFaceEmbeddings(
+            model_name="sentence-transformers/all-MiniLM-L6-v2",
+            cache_folder="./models/embeddings",  # Local cache directory
+            model_kwargs={'device': 'cpu'}  # Force CPU to ensure offline usage
+        )
 
-        return HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
+    def _numeric_sort_key(self, filename: Path) -> float:
+        """Extract page number for numeric sorting of filenames."""
+        try:
+            # Extract the number from filename (e.g., 'page_1.md' -> 1)
+            name_parts = filename.stem.rsplit('_', 1)
+            if len(name_parts) == 2 and name_parts[1].isdigit():
+                return int(name_parts[1])
+            return float('inf')  # For files without numbers
+        except (ValueError, IndexError):
+            return float('inf')
 
-    def get_excerpt(self,md_text: str, max_pages: int = 20) -> str:
-        """
-        Split by '## Page ' markers (if present) or fallback to 10k chars
-        """
-        pages = md_text.split("## Page ")
-        if len(pages) > 1:
-            return "\n".join(pages[: max_pages + 1])
-        return md_text[:50000]  # fallback
-
-    def create_metadata(self, folder_path: str, category: str, tags: List[str], force_reprocess: bool = True) -> Iterator[Dict]:
+    async def create_metadata(self, folder_path: str, category: str, tags: List[str], doc_id: str, user_id: str, force_reprocess: bool = True) -> AsyncIterator[Dict]:
         """Extract text from Markdown files in a folder and process them."""
-        pages = []  # Store processed pages
+        pages = []
+        last_metadata = None
+        
+        # Get all subfolders
+        subfolders = [f for f in Path(folder_path).iterdir() if f.is_dir()]
+        
+        if subfolders:
+            # ZIP file case - process each subfolder separately
+            for subfolder in sorted(subfolders):
+                # Sort files within each subfolder
+                md_files = sorted(subfolder.glob("*.md"), key=self._numeric_sort_key)
+                
+                # Process files in each subfolder
+                subfolder_pages = []
+                for i, md_file in enumerate(md_files, 1):
+                    try:
+                        with open(md_file, "r", encoding="utf-8") as file:
+                            batch = file.read()
+                        
+                        content = self._extract_section_title_with_context(last_metadata, batch)
+                        last_metadata = content
+                        
+                        tables = self._extract_tables_from_markdown(batch)
+                        page_data = {
+                            'section_num': i,
+                            'category': category,
+                            'title': content['title'],
+                            'text': batch,
+                            'summary': content['summary'],
+                            'source': str(md_file),
+                            'format': 'markdown',
+                            'tables': tables,
+                        }
+                        
+                        await rabbitmq_client.send_message(
+                            settings.NOTIFY_QUEUE,
+                            json.dumps({
+                                "event_type": "document_notify",
+                                "doc_id": doc_id,
+                                "user_id": user_id,
+                            })
+                        )
+                        
+                        subfolder_pages.append(page_data)
+                        yield page_data
+                        
+                    except Exception as e:
+                        print(f"Error processing file {md_file}: {str(e)}")
+                        continue
+                
+                # Reset last_metadata for next subfolder
+                last_metadata = None
+                pages.extend(subfolder_pages)
+                
+        else:
+            # Single folder case
+            md_files = sorted(Path(folder_path).glob("*.md"), key=self._numeric_sort_key)
+            for i, md_file in enumerate(md_files, 1):
+                try:
+                    with open(md_file, "r", encoding="utf-8") as file:
+                        batch = file.read()
+                    
+                    content = self._extract_section_title_with_context(last_metadata, batch)
+                    last_metadata = content
+                    
+                    tables = self._extract_tables_from_markdown(batch)
+                    page_data = {
+                        'section_num': i,
+                        'category': category,
+                        'title': content['title'],
+                        'text': batch,
+                        'summary': content['summary'],
+                        'source': str(md_file),
+                        'format': 'markdown',
+                        'tables': tables,
+                    }
+                    
+                    await rabbitmq_client.send_message(
+                        settings.NOTIFY_QUEUE,
+                        json.dumps({
+                            "event_type": "document_notify",
+                            "doc_id": doc_id,
+                            "user_id": user_id,
+                        })
+                    )
+                    
+                    pages.append(page_data)
+                    yield page_data
+                    
+                except Exception as e:
+                    print(f"Error processing file {md_file}: {str(e)}")
+                    continue
 
-        # # List all markdown files (page_1.md, page_2.md, etc.)
-        md_files = sorted(Path(folder_path).glob("*.md"))
-        for i, md_file in enumerate(md_files):
-            with open(md_file, "r", encoding="utf-8") as file:
-                batch = file.read()  # Read markdown content
-
-            excerpt = self.get_excerpt(batch)
-            # Extract section title, summary, and tables
-            title = self._extract_section_title(excerpt)
-            summary = self.summarize_page(excerpt)
-            tables = self._extract_tables_from_markdown(excerpt)
-            metadata = self._extract_dynamic_metadata(excerpt, tags)
-
-            page_data = {
-            'section_num': i+1,
-            'category': category,
-            'title': title,
-            'text': batch,
-            'summary': summary,
-            'source': str(md_file),
-            'format': 'markdown',
-            'tables': tables,
-            'file_metadata': metadata
-        }
-
-            pages.append(page_data)  # Store for caching
-            yield page_data  # Yield processed data immediately
         # Cache processed pages
         self.processed_files[folder_path] = pages
 
-    def _extract_section_title(self, markdown_content: str) -> Optional[str]:
-        prompt = f"""Extract the main title from the following Markdown content. 
-        If there is no clear title, return the best possible inferred title.\n\n
-        {markdown_content}\n\nTitle:"""
+    def _extract_section_title_with_context(self, prev_metadata: Optional[Dict[str, str]], current_markdown: str) -> Dict[str, str]:
+        """
+        Decide whether the current page continues from the previous one or starts a new topic.
+        Returns only the relevant titles for this page.
+        """
 
-        response = ollama.chat(model="gemma2:2b", messages=[{"role": "user", "content": prompt}])
-        return response["message"]["content"].strip()
+        prev_title = prev_metadata.get("title") if prev_metadata else "None"
+        prev_summary = prev_metadata.get("summary") if prev_metadata else "None"
+        
+        if prev_title :
+            prev_title = prev_title.split(" > ")[-1]  # Get the last part of the hierarchical title
 
+        prompt = f"""
+            You are analyzing two consecutive markdown pages extracted from a context.
+
+            Previous page metadata:
+            Title: {prev_title}
+            Summary: {prev_summary}
+
+            Current page markdown:
+            \"\"\"{current_markdown}\"\"\"
+
+            Rules:
+            1. If this page clearly continues the same section (same exam, same topic), keep the same title.
+            2. If it introduces a new section (e.g., new body part, new screening, or 'IMPRESSION'), include both titles:
+            - First: previous (if still relevant)
+            - Second: the new heading found on this page
+            3. If the page only has a new section unrelated to the previous, output only that new title.
+            4. Do NOT repeat older sections that are not relevant anymore.
+            5. Return **valid JSON** only in this format:
+
+            {{
+            "titles": ["relevant titles only"],
+            "summary": "Brief 2–3 line summary of this page."
+            }}
+            """
+
+
+        try:
+            response = ollama.chat(
+                model="gemma2:2b",
+                messages=[{"role": "user", "content": prompt}],
+            )
+
+            # Extract clean JSON
+            content = (
+                response.get("message", {}).get("content")
+                or response.get("messages", [{}])[0].get("content", "")
+            ).strip()
+            content = re.sub(r"^```(?:json)?|```$", "", content, flags=re.MULTILINE).strip()
+            match = re.search(r"\{.*\}", content, re.DOTALL)
+            if match:
+                content = match.group(0)
+
+            result = json.loads(content)
+
+            titles = result.get("titles", [])
+            if isinstance(titles, str):
+                titles = [titles]
+
+            return {
+                "title": " > ".join(titles),
+                "summary": result.get("summary", "Content available").strip()
+            }
+
+        except Exception as e:
+            logging.error(f"Error parsing LLM output: {e}")
+            return {
+                "title": prev_title if prev_title != "None" else "Untitled",
+                "summary": "Content available"
+            }
+
+    
     def _extract_tables_from_markdown(self, markdown_text: str) -> List[Dict]:
         """Extract tables from markdown text."""
         table_pattern = r'\|(.+)\|\n\|([-:]+\|)+\n(\|.+\|\n)+'
@@ -135,162 +267,89 @@ class PDFProcessor:
             })
         return tables
 
-    def summarize_page(self,content: str, is_markdown: bool = True, model_name: str = "gemma2:2b") -> str:
-        # Clean Markdown if needed
-        if is_markdown:
-            content = re.sub(r'#{1,6}\s|[_`]', '', content)
-        content = re.sub(r'\s+', ' ', content).strip()  # Normalize spaces
-
-        # Truncate content for processing while maintaining sentence integrity
-        max_length = 3000
-        if len(content) > max_length:
-            truncated_content = content[:max_length]
-            last_sentence = truncated_content.rfind('.')
-            content = truncated_content[:last_sentence + 1] if last_sentence > 0 else truncated_content
-
-        # Optimized Prompt for Enterprise Summarization
-        prompt = f"""Extract structured metadata from the following document text to enhance retrieval accuracy. 
-
-        Focus on:  
-
-        1️⃣ Key Topic & Relevance:  
-        - Identify the type of document context for the business.
-        - Explore different avenues of businesses where this document will be useful.
-        - Highlight its significance in enterprise context.
-
-        2️⃣ Essential Information for Retrieval:  
-        - Core business value that can be derived from this business intelligence.
-        - Important statistical analysis, business correlation, risk metrics and impacts.
-        - Any person name provided has to be acurately figured out.
-
-        3️⃣ Context-Aware Critical and Employee Insights:  
-        - Summarize practical implications and risk involved in business.
-        - Ensure IT Security and Business Security information doesn't get missed.
-        - There could be letter formats in which figure out senders and reciever by understanding from, to and Subject.
-
-        📌 Guidelines:  
-        - Keep the summary concise (max 300 words) but information-dense factually correct with the document.  
-        - Prioritize high-yield facts relevant to examination patterns and business decisions.  
-        - Structure output for easy embedding in a vector database.
-
-        Text:  
-        {content}  
-
-        📌 Response Format:  
-        - Topic: (Core Business Concept)  
-        - Key Information: (Critical Insights)  
-        - Organization Relevance: (How it is used in practice/exams)  
-        - People names involved in the document.
-        - Meta Data invlved in the document.
-        """
-        try:
-            response = ollama.chat(
-                model=model_name,
-                messages=[
-                    {"role": "system", "content": "You are a Busines Consultant generating high quality content. Ensure clarity, accuracy, and structured output for database storage."},
-                    {"role": "user", "content": prompt}
-                ],
-            )
-
-            summary = response["message"]["content"].strip()
-
-            # Clean the summary for storage
-            summary = re.sub(r'\n+', ' ', summary)
-            summary = re.sub(r'\s+', ' ', summary)
-
-            # logging.info(f"summary >>>>>>>{summary}")
-
-            return summary
-
-        except Exception as e:
-            logging.error(f"Error in summarization: {str(e)}")
-            return "Summary generation failed. Please check the content and try again." 
-
- 
-
-    def _extract_dynamic_metadata(self, text: str, tags: List[str], model_name: str = "gemma2:2b") -> Dict[str, str]:
-        """
-        Dynamically extract metadata from a document based on provided tags.
-        Returns a dict with tag names as keys.
-        """
-        # logging.info(f"Extracting metadata for tags: {tags}")
-        # Normalize tags
-        normalized_tags = []
-        for tag in tags:
-            if "," in tag:
-                normalized_tags.extend([t.strip() for t in tag.split(",")])
-            else:
-                normalized_tags.append(tag)
-        tags = normalized_tags
-
-        default_metadata = {tag: "Unknown" for tag in tags}
-
-        tag_instructions = "\n".join([f'- "{tag}": Extract the {tag} from the document.' for tag in tags])
-
-        prompt = f"""
-            Extract the following metadata as a strict JSON object with keys {tags}:
-            {tag_instructions}
-
-            Document:
-            {text}
-
-            Return ONLY valid JSON.
-            All property names and string values MUST use double quotes (").
-            Do not include markdown code blocks or any extra text.
-            If a value is not found, use "Unknown".
+    def _extract_dynamic_metadata(self,text: str,tags: List[str],model_name: str = "phi4-mini:3.8b") -> Dict[str, str]:
+            """
+            Extract only the requested metadata tags from a given text using an LLM.
+            Returns a dict with tag names as keys and extracted values as strings.
             """
 
-        try:
-            # logging.info(f"Metadata extraction prompt: {prompt}")
-            response = ollama.chat(
-                model=model_name,
-                messages=[
-                    {"role": "system", "content": "You are a precise document metadata extractor. Output only valid JSON with double quotes for all property names and string values."},
-                    {"role": "user", "content": prompt}
-                ]
-            )
-            # logging.info(f"Response: {response}")
-            raw_output = response["message"]["content"].strip()
-            # logging.info(f"Raw LLM output for metadata: {raw_output}")
-
-            # Remove markdown code blocks and whitespace
-            raw_output = re.sub(r"^```json|^```|```$", "", raw_output, flags=re.MULTILINE).strip()
-
-            # Try to fix common JSON issues
-            # 1. Replace single quotes with double quotes if no double quotes present
-            if "'" in raw_output and '"' not in raw_output:
-                raw_output = raw_output.replace("'", '"')
-            # 2. Remove trailing commas
-            raw_output = re.sub(r",(\s*[}\]])", r"\1", raw_output)
-            # 3. Remove any leading/trailing junk before/after JSON
-            json_start = raw_output.find("{")
-            json_end = raw_output.rfind("}") + 1
-            if json_start != -1 and json_end != -1:
-                raw_output = raw_output[json_start:json_end]
-
-            # Try parsing JSON
-            try:
-                metadata = json.loads(raw_output)
-            except Exception as parse_err:
-                logging.error(f"JSON parsing failed. Raw output: {raw_output}")
-                return default_metadata
-
-            # Ensure all required fields are present
+            # Normalize tag list (handle comma-separated input)
+            normalized_tags = []
             for tag in tags:
-                if tag not in metadata or not metadata[tag]:
-                    metadata[tag] = default_metadata[tag]
+                if "," in tag:
+                    normalized_tags.extend([t.strip() for t in tag.split(",")])
+                else:
+                    normalized_tags.append(tag)
+            tags = normalized_tags
 
-            # Convert lists to comma-separated strings
-            for k, v in metadata.items():
-                if isinstance(v, list):
-                    metadata[k] = ", ".join(map(str, v))
+            default_metadata = {tag: "Unknown" for tag in tags}
 
-            logging.info(f"Extracted dynamic metadata: {metadata}")
-            return metadata
+            # Build the instruction string dynamically
+            tag_instructions = "\n".join(
+                [f'- "{tag}": Extract the {tag} from the document.' for tag in tags]
+            )
 
-        except Exception as e:
-            logging.error(f"Metadata extraction failed: {e}")
-            return default_metadata
+            prompt = f"""
+            You are a precise document metadata extractor.
+            Extract only the following metadata fields from the document below:
+
+            {tag_instructions}
+
+            Rules:
+            - Output must be a JSON object with **only** these keys: {tags}.
+            - All values must be plain strings.
+            - If a value is not found, use "Unknown".
+            - Do not include explanations, markdown, or code fences.
+            - Use double quotes for all keys and values.
+
+            Document:
+            \"\"\"{text}\"\"\"
+
+            Return only valid JSON.
+            """
+
+            try:
+                response = ollama.chat(
+                    model=model_name,
+                    messages=[
+                        {"role": "system", "content": "You are a strict JSON metadata extractor. Output only valid JSON with the requested keys."},
+                        {"role": "user", "content": prompt},
+                    ],
+                )
+
+                raw_output = (
+                    response.get("message", {}).get("content")
+                    or response.get("messages", [{}])[0].get("content", "")
+                ).strip()
+
+                # Clean code fences and trailing commas
+                raw_output = re.sub(r"^```(?:json)?|```$", "", raw_output, flags=re.MULTILINE).strip()
+                raw_output = re.sub(r",(\s*[}\]])", r"\1", raw_output)
+
+                # Extract JSON portion
+                start, end = raw_output.find("{"), raw_output.rfind("}") + 1
+                if start != -1 and end != -1:
+                    raw_output = raw_output[start:end]
+
+                try:
+                    metadata = json.loads(raw_output)
+                except Exception:
+                    logging.warning(f"Model returned invalid JSON. Output:\n{raw_output}")
+                    return default_metadata
+
+                # Keep only requested tags and fill missing ones
+                clean_metadata = {}
+                for tag in tags:
+                    value = metadata.get(tag, "Unknown")
+                    if isinstance(value, (list, dict)):
+                        value = json.dumps(value, ensure_ascii=False)
+                    clean_metadata[tag] = str(value).strip() or "Unknown"
+
+                return clean_metadata
+
+            except Exception as e:
+                logging.error(f"Metadata extraction failed: {e}")
+                return default_metadata
 
     def _generate_chunk_name(self, chunk_text: str) -> str:
         """Generate a descriptive name for a chunk."""
@@ -300,10 +359,65 @@ class PDFProcessor:
         
         first_sentence = re.split(r'(?<=[.!?])\s+', chunk_text.strip())[0]
         return first_sentence if len(first_sentence) < 50 else chunk_text.strip()[:50] + "..."
-        
-    def create_chunks(self, pages: List[Dict]) -> List[Document]:
-        """Chunk extracted pages for vector storage, returning a list of LangChain Documents."""
 
+    def create_chunks(self, folder_path: str, tags: List[str], pages: List[Dict]) -> List[Document]:
+        """Chunk extracted pages for vector storage with hierarchical metadata."""
+        
+        # Extract file-level metadata
+        file_metadata = {}
+        
+        # Check if the folder has subfolders (ZIP case)
+        subfolders = [f for f in Path(folder_path).iterdir() if f.is_dir()]
+        
+        if subfolders:
+            # ZIP file case - handle each subfolder
+            try:
+                subfolder_metadata = {}
+                for subfolder in subfolders:
+                    combined_text = ""
+                    md_files = sorted(subfolder.glob("*.md"))
+                    
+                    # Only process if folder contains markdown files
+                    if not list(md_files):
+                        continue
+                        
+                    # Combine all text from the subfolder
+                    for md_file in sorted(subfolder.glob("*.md")):
+                        try:
+                            with open(md_file, "r", encoding="utf-8") as f:
+                                combined_text += f.read() + "\n\n"
+                        except Exception as e:
+                            logging.error(f"Error reading file {md_file}: {e}")
+                            continue
+                    
+                    if combined_text.strip():  # Only process if there's actual content
+                        metadata = self._extract_dynamic_metadata(combined_text, tags=tags)
+                        subfolder_metadata[str(subfolder)] = metadata
+                        logging.info(f"Extracted metadata for subfolder {subfolder.name}")
+                    
+                file_metadata = subfolder_metadata
+                
+            except Exception as e:
+                logging.error(f"Error processing ZIP subfolders: {e}")
+                file_metadata = {}
+                
+        else:
+            # Single file case
+            try:
+                combined_text = ""
+                for md_file in sorted(Path(folder_path).glob("*.md")):
+                    with open(md_file, "r", encoding="utf-8") as f:
+                        combined_text += f.read() + "\n\n"
+                        
+                if combined_text.strip():
+                    file_metadata = self._extract_dynamic_metadata(combined_text, tags=tags)
+                    logging.info("Extracted metadata for single file")
+                    
+            except Exception as e:
+                logging.error(f"Error extracting metadata from single file: {e}")
+                file_metadata = {}
+
+        # Create text splitter for chunking
         text_splitter = RecursiveCharacterTextSplitter(
             chunk_size=self.chunk_size,
             chunk_overlap=self.overlap,
@@ -311,14 +425,22 @@ class PDFProcessor:
             length_function=len
         )
 
+        # Process pages and create chunks
         documents = []
         for page in pages:
+            source_path = Path(page['source'])
+            parent_folder = str(source_path.parent)
+            
+            # Get appropriate metadata
+            metadata = (file_metadata.get(parent_folder, file_metadata) 
+                    if isinstance(file_metadata, dict) else {})
+            
+            # Create chunks
             split_texts = text_splitter.split_text(page['text'])
-
+            
             for i, chunk_text in enumerate(split_texts):
                 chunk_name = self._generate_chunk_name(chunk_text)
-
-                # Create basic metadata
+                
                 chunk_metadata = {
                     'summary': str(page.get('summary', '')),
                     'title': str(page.get('title', '')),
@@ -328,14 +450,9 @@ class PDFProcessor:
                     'format': str(page.get('format', 'text')),
                     'chunk_name': str(chunk_name),
                     'category': str(page.get('category', 'unknown')).strip().lower(),
+                    'file_metadata': str(metadata),
                 }
 
-                # Handle file_metadata
-                if 'file_metadata' in page:
-                    # Convert file_metadata to string representation if needed
-                    chunk_metadata['file_metadata'] = str(page['file_metadata'])
-
-                # Handle tables - convert to string representation
                 if 'tables' in page and page['tables']:
                     tables_str = []
                     for table in page['tables']:
@@ -345,14 +462,13 @@ class PDFProcessor:
                             tables_str.append(f"{table_type}: {table_content}")
                     chunk_metadata['tables'] = "; ".join(tables_str)
 
-                # Create Document with the processed metadata
-                documents.append(Document(page_content=chunk_text, metadata=chunk_metadata))
-        # print('documents>>>>>>',documents)
-        # for doc in documents:
-        #     print(doc.page_content)
+                documents.append(Document(
+                    page_content=chunk_text, 
+                    metadata=chunk_metadata
+                ))
 
         return documents
-    
+            
     def save_to_chroma(self, chunks: List[Document]):
         """Store processed chunks into ChromaDB."""
         try:
@@ -425,18 +541,13 @@ class PDFProcessor:
             chunks = self.chunk_sentences(sentences, chunk_size, overlap)
             # corpus.extend(chunks)
             for chunk in chunks:
-                # texts.append()
-                # print(f"BM25 Chunk [Category: {category}] -> {chunk}...")
-            
                 texts.append(chunk)
-
                 corpus.append({
                     "text": chunk,
                     "category": category,
                     "source": source
                 })
-        # for i, doc in enumerate(corpus):
-        #     print(f"Document {i} [Category: {doc['category']}] -> {doc['text']}...")
+        
         return texts, corpus
 
     # Build BM25 index
@@ -470,16 +581,10 @@ class PDFProcessor:
                 logging.error(f"Failed to save BM25 index: {e}")
 
 
-    
-
-
-
     async def index_pdf(self, folder_path: str, category: str, doc_id: str, user_id: str, tags: List[str], force_reindex: bool = False): 
-            #  print(f"Using model: {self.embedding_model} to index {folder_path}")
-
  
-   
         try:
+            
             # Validate input path
             if not os.path.exists(folder_path):
                 raise FileNotFoundError(f"Path does not exist: {folder_path}")
@@ -493,12 +598,13 @@ class PDFProcessor:
 
             # Extract metadata
             try:
-
-                processed_pages = list(self.create_metadata(folder_path, category, tags))
+                processed_pages = [page async for page in self.create_metadata(folder_path, category, tags,doc_id,user_id)]
+                # You can now work with processed_pages here
                 if not processed_pages:
                     raise ValueError(f"No pages were processed from {folder_path}")
-                # logging.info(f"Extracted metadata: {processed_pages}")
+                
                 logging.info(f"Successfully extracted metadata from {len(processed_pages)} files")
+
             except Exception as e:
                 raise Exception(f"Error in metadata extraction: {str(e)}")
 
@@ -527,10 +633,16 @@ class PDFProcessor:
                     "doc_id": doc_id,
                     "user_id": user_id,
                 })
-            )
+            )   
+
             # Create chunks
             try:
-                chunks = self.create_chunks(processed_pages)
+                chunks = self.create_chunks(folder_path, tags, processed_pages)
+                for i, doc in enumerate(chunks, start=1):
+                    print(f"\n--- Chunk {i} ---")
+                    print("ID:", doc.metadata.get("chunk_id", None))
+                    print("Metadata:", doc.metadata)
+                    print("Content:\n", doc.page_content)
                 if not chunks:
                     raise ValueError(f"No chunks were created from {folder_path}")
                 logging.info(f"Successfully created {len(chunks)} chunks")
@@ -559,29 +671,20 @@ class PDFProcessor:
             # Save to ChromaDB
             try:
                 self.save_to_chroma(chunks)
-
                 logging.info(f"Successfully stored chunks in ChromaDB")
             except Exception as e:
                 raise Exception(f"Error saving to ChromaDB: {str(e)}")
 
-
-                        # Save BM25 index for keyword search
             try:
 
-
-
-
-                # 3️⃣ Create BM25 corpus with smaller chunks
+                #Create BM25 corpus with smaller chunks
                 texts, bm25_corpus = self.create_bm25_corpus(processed_pages, chunk_size=50, overlap=10)
                 bm25, texts, tokenized_corpus = self.build_bm25(texts)
                 self.save_bm25_index(doc_id, bm25, texts, bm25_corpus, save_dir=BM25_STORE)
-
-
-
                 logging.info(f"BM25 index created for {folder_path}")
+
             except Exception as e:
                 logging.error(f"Failed to save BM25 index for {folder_path}: {e}")
-
 
             await document_collection().update_one(
                 {"_id": ObjectId(doc_id)},
@@ -635,8 +738,7 @@ class PDFProcessor:
 
     async def setup_retrieval_qa(self, model_name: str = "llama2"):
         """Setup the retrieval QA system using Ollama."""
-
-      
+ 
         try:
             # Use existing vectorstore if available, otherwise create new one
             if self.vectorstore is None:
@@ -710,7 +812,6 @@ class PDFProcessor:
                 for k in keywords:
                     if k.lower() in content_text.lower():
                         content_match = True
-                        # print(f"[Content Match] Keyword '{k}' found in content: {content_text[:100]}...")
                         break
 
             # 3️⃣ Include chunk if match found
@@ -723,156 +824,107 @@ class PDFProcessor:
 
 
     async def ask_question(self, user_id: str, question: str, model_name: str = "gemma3:4b") -> dict:
-        """
-        Ask a question and get an answer from the indexed documents.
-        Handles both Chroma (Document objects) and BM25 (dict) results.
-        """
-
-        # 🔹 Load embedding model
-        model = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2")
-
-        # 🔹 Get user and org info
-        from app.db.mongodb import organization_user_collection
-        existing_user = await organization_user_collection().find_one({"_id": ObjectId(user_id)})
-        organization_id = existing_user.get("organization_id")
-
-        # 🔹 Load org-specific config
-        config = await get_updated_app_config(organization_id)
-        model_name = config.get("llm_model", "gemma3:4b")
-        embedding_model = config.get("embedding_model", "sentence-transformers/all-MiniLM-L6-v2")
-        temperature = config.get("temperature", 0.7)
-
-        # 🔹 Get user category
-        category_id = existing_user.get("category_id", None)
-        user_category = "unknown"
-        if category_id:
-            from app.db.mongodb import category_collection
-            category_doc = await category_collection().find_one({"_id": ObjectId(category_id)})
-            if category_doc:
-                user_category = category_doc.get("name", "unknown")
-
-        logging.info(f"Category ID: {category_id}, User Category: {user_category}")
-        logging.info(f"Using model: {model_name}, temperature: {temperature}")
-
-        # 🔹 Extract keywords
-        metadata_query_result = [w for w in word_tokenize(question.lower()) if w not in stop_words]
-        print(f"extracted keywords from user query: {metadata_query_result}")
-
         try:
-            # === Step 1: Retrieve docs from Chroma ===
+            # === Step 1: Load Config & User Info ===
+            model = sentence_transformer
+            from app.db.mongodb import organization_user_collection, category_collection
+
+            existing_user = await organization_user_collection().find_one({"_id": ObjectId(user_id)})
+            organization_id = existing_user.get("organization_id")
+            config = await get_updated_app_config(organization_id)
+
+            model_name = config.get("llm_model", model_name)
+            embedding_model = config.get("embedding_model", "sentence-transformers/all-MiniLM-L6-v2")
+            temperature = config.get("temperature", 0.7)
+
+            category_id = existing_user.get("category_id", None)
+            user_category = "unknown"
+            if category_id:
+                category_doc = await category_collection().find_one({"_id": ObjectId(category_id)})
+                user_category = category_doc.get("name", "unknown") if category_doc else "unknown"
+            
+            print("=== User & Config Info ===")
+            print("User ID:", user_id)
+            print("Organization ID:", organization_id)
+            print("Model Name:", model_name)
+            print("Embedding Model:", embedding_model)
+            print("Temperature:", temperature)
+            print("User Category:", user_category)
+
+            metadata_query_result = [w for w in word_tokenize(question.lower()) if w not in stop_words]
+
+            # === Step 2: Chroma Retrieval ===
             vectorstore = Chroma(
                 collection_name="rag-chroma",
                 embedding_function=HuggingFaceEmbeddings(model_name=embedding_model),
                 persist_directory=self.persist_directory,
             )
 
-            all_docs = vectorstore.similarity_search("test", k=100)
-            logging.info(f"All document categories: {set([doc.metadata.get('category') for doc in all_docs])}")
-
             try:
                 retrieved_docs = vectorstore.max_marginal_relevance_search(
                     question,
-                    k=5,
-                    fetch_k=16,
-                    lambda_mult=0.7,
+                    k=10,
+                    fetch_k=50,
+                    lambda_mult=0.5,
                     filter={"category": user_category.strip().lower()},
                 )
             except Exception as filter_error:
-                logging.warning(f"Error with filtered search: {str(filter_error)}")
-                retrieved_docs = []
+                logging.warning(f"MMR failed: {str(filter_error)}")
+                retrieved_docs = vectorstore.similarity_search(
+                            question,
+                            k=10,
+                            filter={"category": user_category.strip().lower()}
+                        )
+            print("-------------------------------------------------------------------------------------------")
+            print("=== Retrieved Chroma Chunks ===")
+            print("-------------------------------------------------------------------------------------------")
+            for doc in retrieved_docs:
+                print("Retrieved:", doc.metadata.get("source"), doc.metadata, doc.page_content)
 
-            print(f"Retrieved docs from Chroma: {len(retrieved_docs)}")
-
-            # 🔹 Keyword filtering
             filtered_chunks = self.filter_chunks_by_keywords(retrieved_docs, metadata_query_result)
+            chroma_dicts = [convert_doc_to_dict(doc) for doc in filtered_chunks]
 
-            # for i, doc in enumerate(filtered_chunks, start=1):
-            #     print(f"\n--- Matched Chunk {i} ---")
-            #     print("ID:", doc.id)
-            #     print("Metadata:", doc.metadata)
-            #     print("Content:\n", doc.page_content)
+            # === Step 3: BM25 Retrieval ===
+            bm25_dicts = run_bm25_keyword_search(metadata_query_result, user_category.strip().lower())
+            print("-------------------------------------------------------------------------------------------")
+            print("=== Retrieved BM25 Chunks ===")
+            print("-------------------------------------------------------------------------------------------")
+            for i in bm25_dicts:
+                print("BM25 Retrieved:", i.get("metadata", {}).get("source"), i.get("metadata", {}).get("category"), i.get("text"))
 
-            def convert_doc_to_dict(doc):
-                return {
-                    "text": doc.page_content,
-                    "metadata": doc.metadata,
-                    "chunk_id": doc.metadata.get("chunk_id", None),
-                    "score": None,
-                }
+            # === Step 4: Rerank & Merge ===
+            reranked_chroma = rerank_results(question, chroma_dicts, top_k=5)
+            reranked_bm25 = rerank_results(question, bm25_dicts, top_k=5)
 
-            filtered_dicts = [convert_doc_to_dict(doc) for doc in filtered_chunks]
-
-            # === Step 2: Rank Chroma results ===
-            chroma_dicts = []
-            if filtered_dicts:
-                candidate_embeddings = model.encode([doc["text"] for doc in filtered_dicts], convert_to_tensor=True)
-                query_embedding = model.encode(question, convert_to_tensor=True)
-
-                cos_scores = util.cos_sim(query_embedding, candidate_embeddings)[0]
-                top_results = cos_scores.topk(k=len(filtered_dicts))
-                chroma_dicts = [filtered_dicts[idx] for idx in top_results.indices]
-
-            for i, chunk in enumerate(chroma_dicts, start=1):
-                print(f"\n--- Top Chroma Chunk {i} ---")
-                print("chunks ------- ",chunk)
-                print('--------------------------chroma reranked chunks completed-------------------------')
-
-            # === Step 3: BM25 Keyword Search ===
-            candidate_chunks = run_bm25_keyword_search(metadata_query_result, user_category.strip().lower())
-
-            bm25_dicts = []
-            if candidate_chunks:
-                candidate_embeddings = model.encode([doc["text"] for doc in candidate_chunks], convert_to_tensor=True)
-                query_embedding = model.encode(question, convert_to_tensor=True)
-
-                cos_scores = util.cos_sim(query_embedding, candidate_embeddings)[0]
-                top_results = cos_scores.topk(k=len(candidate_chunks))
-                bm25_dicts = [candidate_chunks[idx] for idx in top_results.indices]
-
-            for i, chunk in enumerate(bm25_dicts, start=1):
-                print(f"\n--- Top BM25 Chunk {i} ---")
-                print("chunks ------- ",chunk)
-                print('--------------------------bm25 reranked chunks completed-------------------------')
-
-
-            # === Step 4: Combine Chroma + BM25 ===
-            top_chunks = chroma_dicts + bm25_dicts
-            top_ranked_chunks = []
-            if top_chunks:
-                candidate_embeddings = model.encode([doc["text"] for doc in top_chunks], convert_to_tensor=True)
-                query_embedding = model.encode(question, convert_to_tensor=True)
-
-                cos_scores = util.cos_sim(query_embedding, candidate_embeddings)[0]
-                top_results = cos_scores.topk(k=len(top_chunks))
-                top_ranked_chunks = [top_chunks[idx] for idx in top_results.indices]
-            print(f"Total top ranked chunks to use as context: {len(top_ranked_chunks)}")
-            for i, chunk in enumerate(top_ranked_chunks, start=1):
-                print(f"\n--- Top Ranked Chunk {i} ---")
-                print("chunks ------- ",chunk)
-                print('--------------------------top ranked chunks completed-------------------------')
-
-            # === Step 5: Format chunks into context ===
-            def format_chunk_for_context(chunk: dict) -> str:
-                metadata = chunk.get("metadata", {})
-                chunk_id = chunk.get("chunk_id", "N/A")
-                source = metadata.get("source", "Unknown")
-                title = metadata.get("title", "")
-                section = metadata.get("section_num", "")
-                file_meta = metadata.get("file_metadata", "")
-
-                return (
-                    f"[Chunk ID: {chunk_id} | Source: {source} | Title: {title} | Section: {section}]\n"
-                    f"File Metadata: {file_meta}\n"
-                    f"Content:\n{chunk.get('text', '')}"
-                )
+            combined_chunks = deduplicate_chunks(reranked_chroma + reranked_bm25)
+            top_ranked_chunks = rerank_results(question, combined_chunks, top_k=5)
+            print("-------------------------------------------------------------------------------------------")
+            print("=== Reranked Chroma Chunks ===")
+            print("-------------------------------------------------------------------------------------------")
+            for i in reranked_chroma:
+                print("Reranked Chroma:", i.get("rerank_score"), i.get("metadata"), i.get("text"))
+            print("-------------------------------------------------------------------------------------------")
+            print("=== Reranked BM25 ===")
+            print("-------------------------------------------------------------------------------------------")
+            for i in reranked_bm25:
+                print("Reranked BM25:", i.get("rerank_score"), i.get("metadata", {}), i.get("text"))
+            print("-------------------------------------------------------------------------------------------")
+            print("=== Final Combined Chunks ===")
+            print("-------------------------------------------------------------------------------------------")
+            for i in top_ranked_chunks:
+                print("Final:", i.get("rerank_score"), i.get("metadata", {}), i.get("text"))
 
             if not top_ranked_chunks:
                 return {"answer": "No relevant context found.", "sources": []}
 
+            # === Step 5: Format Context ===
             context = "\n\n".join([format_chunk_for_context(chunk) for chunk in top_ranked_chunks])
-            print("Context for LLM:\n", context)
+            print("-------------------------------------------------------------------------------------------")
+            print("=== Final Context for LLM ===")
+            print("-------------------------------------------------------------------------------------------")
+            print(context)
 
-            # === Step 6: Query Ollama ===
+            # === Step 6: Query LLM ===
             prompt = f"""
             You are a helpful assistant. 
             Use BOTH the **content** and the **metadata** from the following chunks to answer the question.
@@ -892,35 +944,19 @@ class PDFProcessor:
                 options={"temperature": temperature},
             )
 
+            # === Step 7: Return Answer & Sources ===
             result = {
                 "answer": response.get("message", {}).get("content", "").strip(),
                 "sources": [],
             }
 
-            # Add sources
             for chunk in top_ranked_chunks[:3]:
                 metadata = chunk.get("metadata", {})
                 result["sources"].append({
-                        "file": metadata.get("source", "Unknown").split("/")[-1],
-                        "content": chunk.get("text", ""),
-                        "category": metadata.get("category", "unknown"),
-
+                    "file": metadata.get("source", "Unknown").split("/")[-1],
+                    "content": chunk.get("text", ""),
+                    "category": metadata.get("category", "unknown"),
                 })
-            
-            # for chunk in chroma_dicts[:3]:
-            #     metadata = chunk.get("metadata", {})
-            #     source_path = metadata.get("source", "Unknown")
-            #     file_name = source_path.split("/")[-1]
-            #     folder_name = source_path.split("/")[-2] if "/" in source_path else ""
-            #     file_url = f"/files/{folder_name}/{file_name}" if folder_name else ""
-
-            #     result["sources"].append({
-            #        "file": file_name,
-            #        "file_url": file_url,
-            #        "content": chunk.get("text", ""),
-            #        "category": metadata.get("category", "unknown"),
-            #  })
-
 
             return result
 
@@ -931,6 +967,7 @@ class PDFProcessor:
                 "sources": [],
                 "error": str(e),
             }
+
 
     def search_similar(self, query: str, n_results: int = 3):
         """
@@ -964,11 +1001,7 @@ class PDFProcessor:
             return {"error": str(e)}
             
 
-
 processor = PDFProcessor()
-
-
-
 
 
 
@@ -1019,6 +1052,42 @@ def run_bm25_keyword_search(query: List[str], category: str, bm25_dir="./app/pip
 
     return results
 
+def convert_doc_to_dict(doc):
+    return {
+        "text": doc.page_content,
+        "metadata": doc.metadata,
+        "chunk_id": doc.metadata.get("chunk_id", None),
+        "score": None,
+    }
+
+import hashlib
+
+def deduplicate_chunks(chunks: List[Dict]) -> List[Dict]:
+    seen_hashes = set()
+    unique = []
+    for chunk in chunks:
+        text = chunk.get("text", "").strip()
+        hash_val = hashlib.md5(text.encode("utf-8")).hexdigest()
+        if hash_val not in seen_hashes:
+            seen_hashes.add(hash_val)
+            unique.append(chunk)
+    return unique
+
+def format_chunk_for_context(chunk: dict) -> str:
+    metadata = chunk.get("metadata", {})
+    chunk_id = chunk.get("chunk_id", "N/A")
+    source = metadata.get("source", "Unknown")
+    title = metadata.get("title", "")
+    section = metadata.get("section_num", "")
+    file_meta = metadata.get("file_metadata", "")
+
+    return (
+        # f"[Chunk ID: {chunk_id} | Source: {source} | Title: {title} | Section: {section}]\n"
+        f"File Metadata: {metadata}\n"
+        f"Content:\n{chunk.get('text', '')}"
+    )
+
+
 
 
 def rerank_results(query: str, chunks: List[Dict], top_k: int = 3) -> List[Dict]:
@@ -1041,13 +1110,6 @@ def rerank_results(query: str, chunks: List[Dict], top_k: int = 3) -> List[Dict]
     #     sorted_chunks = [chunk for chunk in sorted_chunks if chunk["rerank_score"] >= min_score]
 
     return sorted_chunks[:top_k]
-
-
-
-
-
-
-
 
 
 def interactive_qa():
@@ -1122,4 +1184,41 @@ def interactive_qa():
 
 # Start the interactive session
 if __name__ == "__main__":
-    interactive_qa()
+    # import asyncio
+    
+    # async def main():
+        # await ensure_models_available()
+        interactive_qa()
+    
+    # asyncio.run(main())
+
+async def ensure_models_available():
+    """Check and download required models for offline use."""
+    models_to_check = [
+        "sentence-transformers/all-MiniLM-L6-v2",
+        "cross-encoder/ms-marco-MiniLM-L-6-v2"
+    ]
+    
+    for model_name in models_to_check:
+        cache_dir = f"./models/{model_name.split('/')[-1]}"
+        if not os.path.exists(cache_dir):
+            print(f"Downloading {model_name} for offline use...")
+            if "cross-encoder" in model_name:
+                CrossEncoder(model_name, cache_folder=cache_dir)
+            else:
+                SentenceTransformer(model_name, cache_folder=cache_dir)
+    
+    print("All required models are available for offline use")
+
+async def main():
+    """Initialize PDFProcessor and required components."""
+    try:
+        await connect_to_mongodb()
+        await ensure_models_available()
+        global processor
+        processor = PDFProcessor()
+        # Initialize ChromaDB and other components if needed
+        logging.info("PDFProcessor initialized successfully")
+    except Exception as e:
+        logging.error(f"Error initializing PDFProcessor: {e}")
+        raise

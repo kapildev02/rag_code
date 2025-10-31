@@ -39,7 +39,11 @@ __pycache__/
 /chromadb_storage/*
 !/chromadb_storage/.gitkeep
 
+/models/*
+!/models/.gitkeep
+
 /app/pipeline/bm25_store/*
+!/app/pipeline/bm25_store/.gitkeep
 
 # Logs
 *.log

@@ -212,6 +212,8 @@ xlsxwriter==3.2.5
 yarl==1.20.1
 zipp==3.23.0
 zstandard==0.23.0
+tabula
 bm25
 rank_bm25
 nltk
+pymupdf4llm
