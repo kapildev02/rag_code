@@ -29,7 +29,57 @@ ENV/
 __pycache__/
 *.py[cod]
 
-# Data - keep folder, ignore contents
+# Data - keep folder, ignore contents# ===========================================
+# PYTHON & ENVIRONMENTS
+# ===========================================
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg-info/
+dist/
+build/
+*.whl
+
+# Virtual environments
+venv/
+env/
+ENV/
+api_venv/
+.venv/
+
+# ===========================================
+# IDEs & EDITORS
+# ===========================================
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# ===========================================
+# ENVIRONMENT FILES
+# ===========================================
+.env
+*.env
+
+# ===========================================
+# LOGS & TEMP FILES
+# ===========================================
+*.log
+*.tmp
+*.bak
+
+# ===========================================
+# DEPLOYMENT / SERVICES
+# ===========================================
+.vercel/
+.heroku/
+__pycache__/
+uploads/__pycache__/
+
+# ===========================================
+# DATA DIRECTORIES (keep folder, ignore contents)
+# ===========================================
 /output_md_files/*
 !/output_md_files/.gitkeep
 
@@ -38,6 +88,49 @@ __pycache__/
 
 /chromadb_storage/*
 !/chromadb_storage/.gitkeep
+
+/models/*
+!/models/.gitkeep
+
+/app/pipelines/bm25_store/*
+!/app/pipelines/bm25_store/.gitkeep
+
+/uploads/*
+!/uploads/.gitkeep
+
+# ===========================================
+# GIT / LFS / BACKUPS
+# ===========================================
+*.zip
+*.tar
+*.tar.gz
+*.rar
+*.7z
+*.bak
+*.old
+
+# Large binary/model files — use Git LFS instead
+*.bin
+*.pt
+*.h5
+*.pkl
+*.onnx
+*.ckpt
+
+/output_md_files/*
+!/output_md_files/.gitkeep
+
+/splited_pdf_pages/*
+!/splited_pdf_pages/.gitkeep
+
+/chromadb_storage/*
+!/chromadb_storage/.gitkeep
+
+/models/*
+!/models/.gitkeep
+
+/app/pipelines/bm25_store/*
+!/app/pipelines/bm25_store/.gitkeep
 
 # Logs
 *.log
