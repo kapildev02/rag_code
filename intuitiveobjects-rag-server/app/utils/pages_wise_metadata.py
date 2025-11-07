@@ -55,8 +55,8 @@ class PDFProcessor:
             self.indexed_files = set()
             self.persist_directory = persist_directory
             self.chunks = []
-            self.chunk_size = 512
-            self.overlap = 128
+            self.chunk_size = 1000
+            self.overlap = 150
             self.embedding_model = self._load_embedding_model()
             self.vectorstore = None  # Will be initialized when saving documents
     
@@ -179,76 +179,90 @@ class PDFProcessor:
         self.processed_files[folder_path] = pages
 
     def _extract_section_title_with_context(self, prev_metadata: Optional[Dict[str, str]], current_markdown: str) -> Dict[str, str]:
-        """
-        Decide whether the current page continues from the previous one or starts a new topic.
-        Returns only the relevant titles for this page.
-        """
+            """
+            Use LLM to detect whether the current page continues from the previous section
+            or starts a new one, and return clean JSON with relevant titles only.
+            """
 
-        prev_title = prev_metadata.get("title") if prev_metadata else "None"
-        prev_summary = prev_metadata.get("summary") if prev_metadata else "None"
-        
-        if prev_title :
-            prev_title = prev_title.split(" > ")[-1]  # Get the last part of the hierarchical title
+            prev_title = prev_metadata.get("title") if prev_metadata else "None"
+            prev_summary = prev_metadata.get("summary") if prev_metadata else "None"
 
-        prompt = f"""
-            You are analyzing two consecutive markdown pages extracted from a context.
+            # Keep only the most recent sub-section for reference
+            if prev_title and " > " in prev_title:
+                prev_title = prev_title.split(" > ")[-1].strip()
+
+            prompt = f"""
+            You are analyzing two consecutive markdown pages extracted from a larger document.
 
             Previous page metadata:
             Title: {prev_title}
             Summary: {prev_summary}
 
-            Current page markdown:
-            \"\"\"{current_markdown}\"\"\"
+            Current page markdown (truncated if long):
+            \"\"\"{current_markdown}\"\"\"  # limit length for model context
 
             Rules:
-            1. If this page clearly continues the same section (same exam, same topic), keep the same title.
-            2. If it introduces a new section (e.g., new body part, new screening, or 'IMPRESSION'), include both titles:
-            - First: previous (if still relevant)
-            - Second: the new heading found on this page
-            3. If the page only has a new section unrelated to the previous, output only that new title.
-            4. Do NOT repeat older sections that are not relevant anymore.
-            5. Return **valid JSON** only in this format:
-
+            1. If this page clearly continues the same section, output the same title.
+            2. If it introduces a new section (e.g., new topic, new header, or different focus),
+            include both titles: the previous (if relevant) and the new one.
+            3. If it's entirely a new, unrelated section, output only the new title.
+            4. Keep only relevant, current titles — do NOT repeat older or unrelated sections.
+            5. Respond ONLY with **valid JSON** in this exact format:
             {{
-            "titles": ["relevant titles only"],
-            "summary": "Brief 2–3 line summary of this page."
+                "titles": ["title1", "title2"],
+                "summary": "2–3 line summary of this page."
             }}
             """
 
+            try:
+                response = ollama.chat(
+                    model="gemma2:2b",
+                    messages=[{"role": "user", "content": prompt}],
+                )
 
-        try:
-            response = ollama.chat(
-                model="gemma2:2b",
-                messages=[{"role": "user", "content": prompt}],
-            )
+                # Normalize output content
+                content = (
+                    response.get("message", {}).get("content")
+                    or response.get("messages", [{}])[-1].get("content", "")
+                ).strip()
 
-            # Extract clean JSON
-            content = (
-                response.get("message", {}).get("content")
-                or response.get("messages", [{}])[0].get("content", "")
-            ).strip()
-            content = re.sub(r"^```(?:json)?|```$", "", content, flags=re.MULTILINE).strip()
-            match = re.search(r"\{.*\}", content, re.DOTALL)
-            if match:
-                content = match.group(0)
+                # Remove markdown fences and keep JSON only
+                content = re.sub(r"^```(?:json)?|```$", "", content, flags=re.MULTILINE).strip()
+                match = re.search(r"\{.*\}", content, re.DOTALL)
+                if match:
+                    content = match.group(0)
 
-            result = json.loads(content)
+                # Try parsing JSON safely with recovery fallback
+                try:
+                    result = json.loads(content)
+                except json.JSONDecodeError:
+                    clean_content = content[content.find("{"): content.rfind("}") + 1]
+                    result = json.loads(clean_content)
 
-            titles = result.get("titles", [])
-            if isinstance(titles, str):
-                titles = [titles]
+                titles = result.get("titles", [])
+                if isinstance(titles, str):
+                    titles = [titles]
 
-            return {
-                "title": " > ".join(titles),
-                "summary": result.get("summary", "Content available").strip()
-            }
+                # Remove duplicates and keep only the last 2 hierarchy levels
+                titles = [t.strip() for t in titles if t.strip()]
+                unique_titles = []
+                for t in titles:
+                    if t not in unique_titles:
+                        unique_titles.append(t)
+                if len(unique_titles) > 2:
+                    unique_titles = unique_titles[-2:]
 
-        except Exception as e:
-            logging.error(f"Error parsing LLM output: {e}")
-            return {
-                "title": prev_title if prev_title != "None" else "Untitled",
-                "summary": "Content available"
-            }
+                return {
+                    "title": " > ".join(unique_titles) if unique_titles else prev_title,
+                    "summary": result.get("summary", "Content available").strip()
+                }
+
+            except Exception as e:
+                logging.error(f"Error parsing LLM output: {e}")
+                return {
+                    "title": prev_title if prev_title and prev_title != "None" else "Untitled",
+                    "summary": "Content available"
+                }
 
     
     def _extract_tables_from_markdown(self, markdown_text: str) -> List[Dict]:
