@@ -23,6 +23,8 @@ def cleanup_mongodb():
         fs = GridFS(db)
         fs_files = db["fs.files"]
         fs_chunks = db["fs.chunks"]
+        organization_file=db["organization_files"]
+
         
         logger.info("Removing all files from GridFS...")
         fs_files.delete_many({})
@@ -30,7 +32,8 @@ def cleanup_mongodb():
         logger.info("All files removed from GridFS.")
         
         # List all collections in the database
-        collections = db.list_collection_names()
+        # collections = db.list_collection_names()
+        collections = [fs_chunks.name, fs_files.name,organization_file.name]
         
         # Remove all documents from each collection (except system collections)
         for collection_name in collections:

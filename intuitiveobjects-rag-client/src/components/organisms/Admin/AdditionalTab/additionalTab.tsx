@@ -19,7 +19,7 @@ type FileType = {
 
 type ConfirmAction = {
   open: boolean;
-  actionType: "mongodb" | "chromadb" | null;
+  actionType: "mongodb" | "indexes" | null;
   input: string;
 };
 
@@ -88,7 +88,7 @@ const AdditionalTab = () => {
     }
   };
 
-  const triggerReset = (type: "mongodb" | "chromadb") => {
+  const triggerReset = (type: "mongodb" | "indexes") => {
     setConfirm({ open: true, actionType: type, input: "" });
   };
 
@@ -151,11 +151,11 @@ const AdditionalTab = () => {
       {/* Reset buttons */}
       <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
         <Button
-          onClick={() => triggerReset("chromadb")}
+          onClick={() => triggerReset("indexes")}
           disabled={loading}
           className="bg-red-600 text-white w-full"
         >
-          Reset ChromaDB
+          Reset indexes 
         </Button>
         <Button
           onClick={() => triggerReset("mongodb")}

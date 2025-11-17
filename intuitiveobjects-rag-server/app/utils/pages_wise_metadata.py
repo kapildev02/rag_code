@@ -14,7 +14,7 @@ import logging
 logging.getLogger("chromadb").setLevel(logging.WARNING) # Suppress ChromaDB logs
 from langchain_community.llms import Ollama
 from langchain.chains import RetrievalQA
-from langchain_chroma import Chroma
+# from langchain_chroma import Chroma
 from datetime import datetime
 from bson import ObjectId
 from app.db.mongodb import document_collection,organization_file_collection, connect_to_mongodb
@@ -64,7 +64,7 @@ class PDFProcessor:
     def _load_embedding_model(self):
         """Load the embedding model for vector storage."""
         return HuggingFaceEmbeddings(
-            model_name="sentence-transformers/all-MiniLM-L6-v2",
+            model_name = "sentence-transformers/all-MiniLM-L6-v2",
             cache_folder="./models/embeddings",  # Local cache directory
             model_kwargs={'device': 'cpu'}  # Force CPU to ensure offline usage
         )
@@ -80,85 +80,45 @@ class PDFProcessor:
         except (ValueError, IndexError):
             return float('inf')
 
-    async def create_metadata(self, folder_path: str, category: str, tags: List[str], doc_id: str, user_id: str, force_reprocess: bool = True) -> AsyncIterator[Dict]:
-        """Extract text from Markdown files in a folder and process them."""
+
+    async def create_metadata(self,folder_path: str,category: str,tags: List[str],doc_id: str,user_id: str,force_reprocess: bool = True) -> AsyncIterator[Dict]:
+        """Extract text and contextual metadata from Markdown files in a folder or subfolders."""
         pages = []
         last_metadata = None
-        
-        # Get all subfolders
-        subfolders = [f for f in Path(folder_path).iterdir() if f.is_dir()]
-        
-        if subfolders:
-            # ZIP file case - process each subfolder separately
-            for subfolder in sorted(subfolders):
-                # Sort files within each subfolder
-                md_files = sorted(subfolder.glob("*.md"), key=self._numeric_sort_key)
-                
-                # Process files in each subfolder
-                subfolder_pages = []
-                for i, md_file in enumerate(md_files, 1):
-                    try:
-                        with open(md_file, "r", encoding="utf-8") as file:
-                            batch = file.read()
-                        
-                        content = self._extract_section_title_with_context(last_metadata, batch)
-                        last_metadata = content
-                        
-                        tables = self._extract_tables_from_markdown(batch)
-                        page_data = {
-                            'section_num': i,
-                            'category': category,
-                            'title': content['title'],
-                            'text': batch,
-                            'summary': content['summary'],
-                            'source': str(md_file),
-                            'format': 'markdown',
-                            'tables': tables,
-                        }
-                        
-                        await rabbitmq_client.send_message(
-                            settings.NOTIFY_QUEUE,
-                            json.dumps({
-                                "event_type": "document_notify",
-                                "doc_id": doc_id,
-                                "user_id": user_id,
-                            })
-                        )
-                        
-                        subfolder_pages.append(page_data)
-                        yield page_data
-                        
-                    except Exception as e:
-                        print(f"Error processing file {md_file}: {str(e)}")
-                        continue
-                
-                # Reset last_metadata for next subfolder
-                last_metadata = None
-                pages.extend(subfolder_pages)
-                
-        else:
-            # Single folder case
-            md_files = sorted(Path(folder_path).glob("*.md"), key=self._numeric_sort_key)
+        folder_path = Path(folder_path)
+
+        subfolders = [f for f in folder_path.iterdir() if f.is_dir()]
+
+        # Choose iteration target
+        folder_targets = sorted(subfolders) if subfolders else [folder_path]
+
+        for target_folder in folder_targets:
+            md_files = sorted(target_folder.glob("*.md"), key=self._numeric_sort_key)
+            subfolder_pages = []
+
             for i, md_file in enumerate(md_files, 1):
                 try:
-                    with open(md_file, "r", encoding="utf-8") as file:
-                        batch = file.read()
-                    
+                    with open(md_file, "r", encoding="utf-8") as f:
+                        batch = f.read().strip()
+
                     content = self._extract_section_title_with_context(last_metadata, batch)
                     last_metadata = content
-                    
+                    print(content)
                     tables = self._extract_tables_from_markdown(batch)
+
+                    title = content.get("title", "Untitled").strip() or "Untitled"
+                    section_title = content.get("section_title", "").strip() or title
                     page_data = {
-                        'section_num': i,
-                        'category': category,
-                        'title': content['title'],
-                        'text': batch,
-                        'summary': content['summary'],
-                        'source': str(md_file),
-                        'format': 'markdown',
-                        'tables': tables,
+                        "section_num": i,
+                        "category": category,
+                        "title": title,
+                        "section_title": section_title,
+                        "summary": content.get("summary", "Content available").strip(),
+                        "text": batch,
+                        "source": str(md_file),
+                        "format": "markdown",
+                        "tables": tables,
                     }
-                    
                     await rabbitmq_client.send_message(
                         settings.NOTIFY_QUEUE,
                         json.dumps({
@@ -167,119 +127,105 @@ class PDFProcessor:
                             "user_id": user_id,
                         })
                     )
-                    
-                    pages.append(page_data)
+
+                    subfolder_pages.append(page_data)
                     yield page_data
-                    
+
                 except Exception as e:
-                    print(f"Error processing file {md_file}: {str(e)}")
+                    logging.error(f"Error processing file {md_file}: {e}")
                     continue
+            last_metadata = None
+            pages.extend(subfolder_pages)
 
-        # Cache processed pages
+        # Cache final processed pages
         self.processed_files[folder_path] = pages
-
     def _extract_section_title_with_context(self, prev_metadata: Optional[Dict[str, str]], current_markdown: str) -> Dict[str, str]:
-            """
-            Use LLM to detect whether the current page continues from the previous section
-            or starts a new one, and return clean JSON with relevant titles only.
-            """
+        """
+        Detect whether current markdown continues previous section or introduces a new one.
+        Returns concise title(s), section title, and contextual summary.
+        """
 
-            prev_title = prev_metadata.get("title") if prev_metadata else "None"
-            prev_summary = prev_metadata.get("summary") if prev_metadata else "None"
+        prev_title = prev_metadata.get("title") if prev_metadata else "None"
+        prev_summary = prev_metadata.get("summary") if prev_metadata else "None"
+        
+        if prev_title :
+            prev_title = prev_title.split(" > ")[-1]  # Get the last part of the hierarchical title
 
-            # Keep only the most recent sub-section for reference
-            if prev_title and " > " in prev_title:
-                prev_title = prev_title.split(" > ")[-1].strip()
+        # Build prompt using safe concatenation to avoid accidental interpretation of
+        # literal braces inside f-strings (which causes "Invalid format specifier" errors).
+        prompt = (
+            "You are analyzing two consecutive markdown pages extracted from a context.\n\n"
+            "Previous page metadata:\n"
+            "Title: " + str(prev_title) + "\n"
+            "Summary: " + str(prev_summary) + "\n\n"
+            "Current page markdown:\n'''"
+            + current_markdown +
+            "'''\n\n"
+            "Rules:\n"
+            "1. If this page clearly continues the same section (same exam, same topic), keep the same title.\n"
+            "2. If it introduces a new section (e.g., new body part, new screening, or 'IMPRESSION'), include both titles:\n"
+            "- First: previous (if still relevant)\n"
+            "- Second: the new heading found on this page\n"
+            "3. If the page only has a new section unrelated to the previous, output only that new title.\n"
+            "4. Do NOT repeat older sections that are not relevant anymore.\n"
+            "5. Return valid JSON only in this format:\n\n"
+            "{\n"
+            '"titles": ["relevant titles only"],\n'
+            '"section_title": "Most relevant section title on this page.",\n'
+            '"summary": "Brief 2–3 line summary of this page."\n'
+            "}\n"
+        )
 
-            prompt = f"""
-            You are analyzing two consecutive markdown pages extracted from a larger document.
 
-            Previous page metadata:
-            Title: {prev_title}
-            Summary: {prev_summary}
+        try:
+            response = ollama.chat(
+                model="gemma2:2b",
+                messages=[{"role": "user", "content": prompt}],
+            )
 
-            Current page markdown (truncated if long):
-            \"\"\"{current_markdown}\"\"\"  # limit length for model context
+            # Extract clean JSON
+            content = (
+                response.get("message", {}).get("content")
+                or response.get("messages", [{}])[0].get("content", "")
+            ).strip()
+            content = re.sub(r"^```(?:json)?|```$", "", content, flags=re.MULTILINE).strip()
+            match = re.search(r"\{.*\}", content, re.DOTALL)
+            if match:
+                content = match.group(0)
 
-            Rules:
-            1. If this page clearly continues the same section, output the same title.
-            2. If it introduces a new section (e.g., new topic, new header, or different focus),
-            include both titles: the previous (if relevant) and the new one.
-            3. If it's entirely a new, unrelated section, output only the new title.
-            4. Keep only relevant, current titles — do NOT repeat older or unrelated sections.
-            5. Respond ONLY with **valid JSON** in this exact format:
-            {{
-                "titles": ["title1", "title2"],
-                "summary": "2–3 line summary of this page."
-            }}
-            """
+            result = json.loads(content)
 
-            try:
-                response = ollama.chat(
-                    model="gemma2:2b",
-                    messages=[{"role": "user", "content": prompt}],
-                )
+            titles = result.get("titles", [])
+            if isinstance(titles, str):
+                titles = [titles]
 
-                # Normalize output content
-                content = (
-                    response.get("message", {}).get("content")
-                    or response.get("messages", [{}])[-1].get("content", "")
-                ).strip()
+            return {
+                "title": " > ".join(titles),
+                "section_title": result.get("section_title", titles[-1] if titles else "Untitled").strip(),
+                "summary": result.get("summary", "Content available").strip()
+            }
 
-                # Remove markdown fences and keep JSON only
-                content = re.sub(r"^```(?:json)?|```$", "", content, flags=re.MULTILINE).strip()
-                match = re.search(r"\{.*\}", content, re.DOTALL)
-                if match:
-                    content = match.group(0)
+        except Exception as e:
+            logging.error(f"Error parsing LLM output: {e}")
+            return {
+                "title": prev_title if prev_title != "None" else "Untitled",
+                "section_title": prev_title if prev_title != "None" else "Untitled",
+                "summary": "Content available"
+            }
 
-                # Try parsing JSON safely with recovery fallback
-                try:
-                    result = json.loads(content)
-                except json.JSONDecodeError:
-                    clean_content = content[content.find("{"): content.rfind("}") + 1]
-                    result = json.loads(clean_content)
-
-                titles = result.get("titles", [])
-                if isinstance(titles, str):
-                    titles = [titles]
-
-                # Remove duplicates and keep only the last 2 hierarchy levels
-                titles = [t.strip() for t in titles if t.strip()]
-                unique_titles = []
-                for t in titles:
-                    if t not in unique_titles:
-                        unique_titles.append(t)
-                if len(unique_titles) > 2:
-                    unique_titles = unique_titles[-2:]
-
-                return {
-                    "title": " > ".join(unique_titles) if unique_titles else prev_title,
-                    "summary": result.get("summary", "Content available").strip()
-                }
-
-            except Exception as e:
-                logging.error(f"Error parsing LLM output: {e}")
-                return {
-                    "title": prev_title if prev_title and prev_title != "None" else "Untitled",
-                    "summary": "Content available"
-                }
-
-    
     def _extract_tables_from_markdown(self, markdown_text: str) -> List[Dict]:
-        """Extract tables from markdown text."""
+        """Extract markdown tables into structured dictionaries."""
         table_pattern = r'\|(.+)\|\n\|([-:]+\|)+\n(\|.+\|\n)+'
         tables_raw = re.findall(table_pattern, markdown_text)
-        
+
         tables = []
         for table_match in tables_raw:
-            # Process each table
-            # In a complete implementation, this would parse the markdown table format
-            # into a structured representation
             tables.append({
-                'raw_content': ''.join(table_match),
-                'type': 'markdown_table'
+                "raw_content": ''.join(table_match),
+                "type": "markdown_table"
             })
         return tables
+
 
     def _extract_dynamic_metadata(self,text: str,tags: List[str],model_name: str = "phi4-mini:3.8b") -> Dict[str, str]:
             """
@@ -458,6 +404,7 @@ class PDFProcessor:
                 chunk_metadata = {
                     'summary': str(page.get('summary', '')),
                     'title': str(page.get('title', '')),
+                    'section_title': str(page.get('section_title', '')),
                     'section_num': str(page.get('section_num', '')),
                     'chunk_id': len(documents),
                     'source': str(page['source']),
@@ -840,7 +787,7 @@ class PDFProcessor:
     async def ask_question(self, user_id: str, question: str, model_name: str = "gemma3:4b") -> dict:
         try:
             # === Step 1: Load Config & User Info ===
-            model = sentence_transformer
+            
             from app.db.mongodb import organization_user_collection, category_collection
 
             existing_user = await organization_user_collection().find_one({"_id": ObjectId(user_id)})
@@ -870,7 +817,7 @@ class PDFProcessor:
             # === Step 2: Chroma Retrieval ===
             vectorstore = Chroma(
                 collection_name="rag-chroma",
-                embedding_function=HuggingFaceEmbeddings(model_name=embedding_model),
+                embedding_function=self.embedding_model,
                 persist_directory=self.persist_directory,
             )
 
@@ -888,45 +835,45 @@ class PDFProcessor:
                             question,
                             k=10,
                             filter={"category": user_category.strip().lower()}
-                        )
-            print("-------------------------------------------------------------------------------------------")
-            print("=== Retrieved Chroma Chunks ===")
-            print("-------------------------------------------------------------------------------------------")
-            for doc in retrieved_docs:
-                print("Retrieved:", doc.metadata.get("source"), doc.metadata, doc.page_content)
+                       )
+            # print("-------------------------------------------------------------------------------------------")
+            # print("=== Retrieved Chroma Chunks ===")
+            # print("-------------------------------------------------------------------------------------------")
+            # for doc in retrieved_docs:
+            #     print("Retrieved:", doc.metadata.get("source"), doc.metadata, doc.page_content)
 
             filtered_chunks = self.filter_chunks_by_keywords(retrieved_docs, metadata_query_result)
             chroma_dicts = [convert_doc_to_dict(doc) for doc in filtered_chunks]
 
             # === Step 3: BM25 Retrieval ===
             bm25_dicts = run_bm25_keyword_search(metadata_query_result, user_category.strip().lower())
-            print("-------------------------------------------------------------------------------------------")
-            print("=== Retrieved BM25 Chunks ===")
-            print("-------------------------------------------------------------------------------------------")
-            for i in bm25_dicts:
-                print("BM25 Retrieved:", i.get("metadata", {}).get("source"), i.get("metadata", {}).get("category"), i.get("text"))
+            # print("-------------------------------------------------------------------------------------------")
+            # print("=== Retrieved BM25 Chunks ===")
+            # print("-------------------------------------------------------------------------------------------")
+            # for i in bm25_dicts:
+            #     print("BM25 Retrieved:", i.get("metadata", {}).get("source"), i.get("metadata", {}).get("category"), i.get("text"))
 
             # === Step 4: Rerank & Merge ===
-            reranked_chroma = rerank_results(question, chroma_dicts, top_k=5)
-            reranked_bm25 = rerank_results(question, bm25_dicts, top_k=5)
+            reranked_chroma = rerank_results(question, chroma_dicts, top_k=10)
+            reranked_bm25 = rerank_results(question, bm25_dicts, top_k=10)
 
             combined_chunks = deduplicate_chunks(reranked_chroma + reranked_bm25)
-            top_ranked_chunks = rerank_results(question, combined_chunks, top_k=5)
-            print("-------------------------------------------------------------------------------------------")
-            print("=== Reranked Chroma Chunks ===")
-            print("-------------------------------------------------------------------------------------------")
-            for i in reranked_chroma:
-                print("Reranked Chroma:", i.get("rerank_score"), i.get("metadata"), i.get("text"))
-            print("-------------------------------------------------------------------------------------------")
-            print("=== Reranked BM25 ===")
-            print("-------------------------------------------------------------------------------------------")
-            for i in reranked_bm25:
-                print("Reranked BM25:", i.get("rerank_score"), i.get("metadata", {}), i.get("text"))
-            print("-------------------------------------------------------------------------------------------")
-            print("=== Final Combined Chunks ===")
-            print("-------------------------------------------------------------------------------------------")
-            for i in top_ranked_chunks:
-                print("Final:", i.get("rerank_score"), i.get("metadata", {}), i.get("text"))
+            top_ranked_chunks = rerank_results(question, combined_chunks, top_k=10)
+            # print("-------------------------------------------------------------------------------------------")
+            # print("=== Reranked Chroma Chunks ===")
+            # print("-------------------------------------------------------------------------------------------")
+            # for i in reranked_chroma:
+            #     print("Reranked Chroma:", i.get("rerank_score"), i.get("metadata"), i.get("text"))
+            # print("-------------------------------------------------------------------------------------------")
+            # print("=== Reranked BM25 ===")
+            # print("-------------------------------------------------------------------------------------------")
+            # for i in reranked_bm25:
+            #     print("Reranked BM25:", i.get("rerank_score"), i.get("metadata", {}), i.get("text"))
+            # print("-------------------------------------------------------------------------------------------")
+            # print("=== Final Combined Chunks ===")
+            # print("-------------------------------------------------------------------------------------------")
+            # for i in top_ranked_chunks:
+            #     print("Final:", i.get("rerank_score"), i.get("metadata", {}), i.get("text"))
 
             if not top_ranked_chunks:
                 return {"answer": "No relevant context found.", "sources": []}
