@@ -45,6 +45,8 @@ def OrganizationAppConfigEntity(organization_app_config: OrganizationAppConfig) 
         "id": str(organization_app_config["_id"]),
         "llm_model": organization_app_config.get("llm_model"),
         "embedding_model": organization_app_config.get("embedding_model"),
+        "query_model": organization_app_config.get("query_model"),
+        "tags_model": organization_app_config.get("tags_model"),
         "temperature": organization_app_config.get("temperature", 0.7),
         "system_prompt": organization_app_config.get("system_prompt", ""),
         "organization_id": organization_app_config.get("organization_id"),

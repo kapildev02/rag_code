@@ -12,21 +12,33 @@ export const ChatMessage = ({ content, sources, role, timestamp }: ChatMessagePr
   if (!content || (role !== "user" && role !== "assistant")) return null;
   const isUser = role === "user";
   const bubbleStyle = isUser
-    ? "bg-gray-300 text-gray-800 rounded-t-2xl rounded-bl-2xl ml-auto"
-    : "bg-gray-400 text-gray-800 rounded-t-2xl rounded-br-2xl";
+    ? "bg-gray-100 text-gray-800 rounded-t-2xl rounded-bl-2xl ml-auto"
+    : "bg-gray-100 text-gray-800 rounded-t-2xl rounded-br-2xl";
   const isValidTimestamp = timestamp && !isNaN(Date.parse(timestamp));
+  // prefer structured server response: { answer: "...", status?: "...", sources?: [...] }
   const messageText =
-    typeof content === "string" ? content : JSON.stringify(content, null, 2);
+    typeof content === "string"
+      ? content
+      : content && (content as any).answer
+      ? (content as any).answer
+      : JSON.stringify(content, null, 2);
+
+  // treat server "no_context" as non-final UI state or show guidance
+  const isNoContext =
+    messageText === "No relevant context found." ||
+    (content && (content as any).status === "no_context");
+
+  // Only show typing animation when a specific isTyping flag is present (or id === null while streaming)
+  const showTyping = !isUser && (content as any)?.isTyping === true;
+
   return (
     <div className="px-4 py-2">
       <div className={`max-w-max ${isUser ? "ml-auto" : "mr-auto"}`}>
         <div className={`p-3 ${bubbleStyle}`}>
           <div
-            className={`text-sm md:text-base whitespace-pre-wrap break-words ${
-              !isUser && "typing-animation"
-            }`}
+            className={`text-sm md:text-base whitespace-pre-wrap break-words ${showTyping ? "typing-animation" : ""}`}
           >
-            {messageText}
+            {isNoContext ? "No context available — try broadening your query or re-ingesting documents." : messageText}
           </div>
         </div>
         {/* Sources Section */}
@@ -63,16 +75,16 @@ export const ChatMessage = ({ content, sources, role, timestamp }: ChatMessagePr
   <div className="fixed inset-0 flex items-center justify-center bg-black bg-opacity-50 z-50">
     <div className="bg-white text-black rounded-lg p-4 max-w-2xl w-full max-h-[80vh] flex flex-col">
       {/* Header */}
-      <h2 className="text-lg font-bold mb-2">{selectedSource.file}</h2>
+      <h2 className="text-gray-600 font-bold mb-2">{selectedSource.file}</h2>
       {/* Scrollable content */}
       <div className="flex-1 overflow-y-auto pr-2">
         {selectedSource.content && (
-          <p className="mb-2 whitespace-pre-wrap break-words">
+          <p className="text-gray-800 mb-2 whitespace-pre-wrap break-words">
             {selectedSource.content}
           </p>
         )}
         {selectedSource.category && (
-          <p className="text-sm text-gray-600">
+          <p className="text-sm text-gray-800">
             Category: {selectedSource.category}
           </p>
         )}

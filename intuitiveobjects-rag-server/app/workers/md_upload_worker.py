@@ -24,8 +24,11 @@ from typing import List
 import sys
 from pathlib import Path
 import os
+import torch
 os.environ["TORCH_CPP_LOG_LEVEL"] = "ERROR"  # hide C++ backend logs
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"  # hide TensorFlow logs   
+DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+print(f"Document converter using device: {DEVICE}")
 from docling.document_converter import DocumentConverter
 from app.utils.pages_wise_metadata import processor
 import pathlib
@@ -304,7 +307,7 @@ async def on_message(task: aio_pika.IncomingMessage):
     try:
         message = json.loads(task.body.decode())
 
-        print(f"TASK: doc: {message["doc_id"]}, user: {message["user_id"]}")
+        # print(f"TASK: doc: {message["doc_id"]}, user: {message["user_id"]}")
 
         # doc id
         doc_id = message["doc_id"]

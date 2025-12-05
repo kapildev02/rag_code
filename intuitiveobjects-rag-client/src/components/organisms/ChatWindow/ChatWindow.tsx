@@ -7,6 +7,7 @@ import { Loader } from "@/components/atoms/Loading/Loading";
 import { useAppDispatch, useAppSelector } from "@/store/hooks";
 import { useParams } from "react-router-dom";
 import { getChatMessagesApi } from "@/services/chatApis";
+import { motion } from "framer-motion";
 
 interface ChatWindowProps {
   isLoading?: boolean;
@@ -29,7 +30,7 @@ export const ChatWindow = ({ isLoading, onload }: ChatWindowProps) => {
     if (chatId) {
       dispatch(getChatMessagesApi(chatId));
     }
-  }, [chatId]);
+  }, [chatId, dispatch]);
 
   useEffect(() => {
     if (messages.length > 0) {
@@ -38,33 +39,40 @@ export const ChatWindow = ({ isLoading, onload }: ChatWindowProps) => {
   }, [messages, isLoading]);
 
   return (
-    <div className="flex flex-col h-full bg-chat-bg">
-      <div className="relative flex-1">
-        <div className="absolute inset-0 overflow-y-auto">
-          {onload ? (
-            <Loader className="h-screen" />
-          ) : !isLoading && messages.length === 0 ? (
-            <EmptyState
-              title="How can I help you today?"
-              description="Ask me anything!"
-            />
-          ) : (
-            <Container>
-              <MessageList
-                messages={messages.map((message) => ({
-                  ...message,
-                  id: message.id || "",
-                }))}
-                isLoading={isLoading}
-                messagesEndRef={messagesEndRef}
-              />
-            </Container>
-          )}
+    // overall ChatWindow: full screen aware, shifts for large sidebar
+    <div
+      className="flex flex-col h-screen lg:ml-64 relative z-0 bg-gradient-to-b from-slate-50 via-slate-50 to-slate-100 dark:from-slate-900 dark:via-slate-900 dark:to-slate-800"
+      style={{ minHeight: "100vh" }}
+    >
+      {/* Internal sticky header (combines Header features into chat view) */}
+      <header className="sticky top-16 z-30 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 backdrop-blur-md bg-opacity-80 dark:bg-opacity-80">
+        <div className="mx-auto max-w-5xl px-4 sm:px-6 py-3 flex items-center justify-between gap-4">
+          {/* ...existing header content... */}
         </div>
+      </header>
+
+      {/* Message Scroll Area */}
+      <div className="flex-1 overflow-y-auto scrollbar-thin scrollbar-thumb-gray-300 dark:scrollbar-thumb-gray-600 px-4 pb-32 pt-6">
+        {onload ? (
+          <Loader className="h-full" />
+        ) : !isLoading && messages.length === 0 ? (
+          <EmptyState title="No messages yet" description="Start a new conversation by typing a message below." />
+        ) : (
+          <Container className="max-w-4xl mx-auto">
+            <MessageList
+              messages={messages.map((m) => ({ ...m, id: m.id || "" }))}
+              isLoading={isLoading}
+              messagesEndRef={messagesEndRef}
+            />
+            <div ref={messagesEndRef} />
+          </Container>
+        )}
       </div>
+
+      {/* Input Footer */}
       {chatId && (
-        <div className="sticky bottom-0 border-t border-chat-border bg-chat-bg">
-          <Container className="p-4">
+        <div className="border-t border-gray-200 dark:border-gray-700 bg-white dark:bg-slate-800 px-4 py-4">
+          <Container className="max-w-4xl mx-auto">
             <ChatInput disabled={history.length === 0} />
           </Container>
         </div>

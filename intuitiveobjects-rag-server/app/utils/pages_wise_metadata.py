@@ -26,6 +26,7 @@ from pathlib import Path
 BM25_STORE = "app/pipeline/bm25_store"
 Path(BM25_STORE).mkdir(parents=True, exist_ok=True)
 from sentence_transformers import CrossEncoder, SentenceTransformer
+from app.db.mongodb import organization_user_collection, category_collection
 from rank_bm25 import BM25Okapi
 import nltk
 from sentence_transformers import util
@@ -35,14 +36,19 @@ nltk.download("punkt")          # sentence & word tokenization
 nltk.download("punkt_tab")      # (needed in NLTK 3.8+ for multilingual)
 nltk.download("stopwords") 
 stop_words = set(stopwords.words("english"))
+import torch
+DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+print(f"\nLoading models on {DEVICE.upper()}...")
 reranker_model = CrossEncoder(
     "cross-encoder/ms-marco-MiniLM-L-6-v2",
-    cache_folder="./models/cross_encoder"
+    cache_folder="./models/cross_encoder",
+    device=DEVICE
 )
 
 sentence_transformer = SentenceTransformer(
     "sentence-transformers/all-MiniLM-L6-v2",
-    cache_folder="./models/sentence_transformer"
+    cache_folder="./models/sentence_transformer",
+    device=DEVICE
 )
 
 # Define the directory for ChromaDB persistence
@@ -64,9 +70,9 @@ class PDFProcessor:
     def _load_embedding_model(self):
         """Load the embedding model for vector storage."""
         return HuggingFaceEmbeddings(
-            model_name = "sentence-transformers/all-MiniLM-L6-v2",
-            cache_folder="./models/embeddings",  # Local cache directory
-            model_kwargs={'device': 'cpu'}  # Force CPU to ensure offline usage
+            model_name="sentence-transformers/all-MiniLM-L6-v2",
+            cache_folder="./models/embeddings",
+            model_kwargs={'device': DEVICE}  # Use GPU if available
         )
 
     def _numeric_sort_key(self, filename: Path) -> float:
@@ -227,13 +233,15 @@ class PDFProcessor:
         return tables
 
 
-    def _extract_dynamic_metadata(self,text: str,tags: List[str],model_name: str = "phi4-mini:3.8b") -> Dict[str, str]:
+    def _extract_dynamic_metadata(self,text: str,tags: List[str],model_name: str ) -> Dict[str, str]:
             """
             Extract only the requested metadata tags from a given text using an LLM.
             Returns a dict with tag names as keys and extracted values as strings.
             """
-
+            if not model_name:
+                model_name = "phi4-mini:3.8b"
             # Normalize tag list (handle comma-separated input)
+            print(f"model_name in _extract_dynamic_metadata: {model_name}")
             normalized_tags = []
             for tag in tags:
                 if "," in tag:
@@ -320,7 +328,7 @@ class PDFProcessor:
         first_sentence = re.split(r'(?<=[.!?])\s+', chunk_text.strip())[0]
         return first_sentence if len(first_sentence) < 50 else chunk_text.strip()[:50] + "..."
 
-    def create_chunks(self, folder_path: str, tags: List[str], pages: List[Dict]) -> List[Document]:
+    def create_chunks(self, folder_path: str, tags: List[str],model_name: str, pages: List[Dict]) -> List[Document]:
         """Chunk extracted pages for vector storage with hierarchical metadata."""
         
         # Extract file-level metadata
@@ -351,7 +359,7 @@ class PDFProcessor:
                             continue
                     
                     if combined_text.strip():  # Only process if there's actual content
-                        metadata = self._extract_dynamic_metadata(combined_text, tags=tags)
+                        metadata = self._extract_dynamic_metadata(combined_text, tags=tags, model_name=model_name)
                         subfolder_metadata[str(subfolder)] = metadata
                         logging.info(f"Extracted metadata for subfolder {subfolder.name}")
                     
@@ -370,7 +378,7 @@ class PDFProcessor:
                         combined_text += f.read() + "\n\n"
                         
                 if combined_text.strip():
-                    file_metadata = self._extract_dynamic_metadata(combined_text, tags=tags)
+                    file_metadata = self._extract_dynamic_metadata(combined_text, tags=tags , model_name=model_name)
                     logging.info("Extracted metadata for single file")
                     
             except Exception as e:
@@ -411,7 +419,7 @@ class PDFProcessor:
                     'format': str(page.get('format', 'text')),
                     'chunk_name': str(chunk_name),
                     'category': str(page.get('category', 'unknown')).strip().lower(),
-                    'file_metadata': str(metadata),
+                    'file_Tags': str(metadata),
                 }
 
                 if 'tables' in page and page['tables']:
@@ -595,10 +603,12 @@ class PDFProcessor:
                     "user_id": user_id,
                 })
             )   
-
+            #configure model per user org settings
+            config = await get_updated_app_config(organization_id)
+            model_name = config.get("tags_model", "phi4-mini:3.8b")
             # Create chunks
             try:
-                chunks = self.create_chunks(folder_path, tags, processed_pages)
+                chunks = self.create_chunks(folder_path, tags, processed_pages, model_name)
                 for i, doc in enumerate(chunks, start=1):
                     print(f"\n--- Chunk {i} ---")
                     print("ID:", doc.metadata.get("chunk_id", None))
@@ -787,8 +797,6 @@ class PDFProcessor:
     async def ask_question(self, user_id: str, question: str, model_name: str = "gemma3:4b") -> dict:
         try:
             # === Step 1: Load Config & User Info ===
-            
-            from app.db.mongodb import organization_user_collection, category_collection
 
             existing_user = await organization_user_collection().find_one({"_id": ObjectId(user_id)})
             organization_id = existing_user.get("organization_id")
@@ -797,7 +805,8 @@ class PDFProcessor:
             model_name = config.get("llm_model", model_name)
             embedding_model = config.get("embedding_model", "sentence-transformers/all-MiniLM-L6-v2")
             temperature = config.get("temperature", 0.7)
-
+            query_model = config.get("query_model", "qwen3:8b")  # 'chroma', 'bm25', or 'hybrid'
+            tags_model = config.get("tags_model", "phi4-mini:3.8b")
             category_id = existing_user.get("category_id", None)
             user_category = "unknown"
             if category_id:
@@ -809,6 +818,8 @@ class PDFProcessor:
             print("Organization ID:", organization_id)
             print("Model Name:", model_name)
             print("Embedding Model:", embedding_model)
+            print("Query Model:" ,query_model)
+            print("Tags Model:", tags_model)
             print("Temperature:", temperature)
             print("User Category:", user_category)
 
@@ -836,22 +847,13 @@ class PDFProcessor:
                             k=10,
                             filter={"category": user_category.strip().lower()}
                        )
-            # print("-------------------------------------------------------------------------------------------")
-            # print("=== Retrieved Chroma Chunks ===")
-            # print("-------------------------------------------------------------------------------------------")
-            # for doc in retrieved_docs:
-            #     print("Retrieved:", doc.metadata.get("source"), doc.metadata, doc.page_content)
 
             filtered_chunks = self.filter_chunks_by_keywords(retrieved_docs, metadata_query_result)
             chroma_dicts = [convert_doc_to_dict(doc) for doc in filtered_chunks]
 
             # === Step 3: BM25 Retrieval ===
             bm25_dicts = run_bm25_keyword_search(metadata_query_result, user_category.strip().lower())
-            # print("-------------------------------------------------------------------------------------------")
-            # print("=== Retrieved BM25 Chunks ===")
-            # print("-------------------------------------------------------------------------------------------")
-            # for i in bm25_dicts:
-            #     print("BM25 Retrieved:", i.get("metadata", {}).get("source"), i.get("metadata", {}).get("category"), i.get("text"))
+           
 
             # === Step 4: Rerank & Merge ===
             reranked_chroma = rerank_results(question, chroma_dicts, top_k=10)
@@ -876,7 +878,9 @@ class PDFProcessor:
             #     print("Final:", i.get("rerank_score"), i.get("metadata", {}), i.get("text"))
 
             if not top_ranked_chunks:
-                return {"answer": "No relevant context found.", "sources": []}
+                # return a clearer message or include a status field,
+                # so the frontend can distinguish "no context" vs. final answer.
+                return {"answer": "No relevant context found. Try broadening your query or re-ingesting documents.", "sources": [], "status": "no_context"}
 
             # === Step 5: Format Context ===
             context = "\n\n".join([format_chunk_for_context(chunk) for chunk in top_ranked_chunks])
@@ -887,22 +891,25 @@ class PDFProcessor:
 
             # === Step 6: Query LLM ===
             prompt = f"""
-            You are a helpful assistant. 
-            Use BOTH the **content** and the **metadata** from the following chunks to answer the question.
-
-            Context Chunks: 
+            You must answer ONLY using information from the Context Chunks below.
+            If a detail is not directly present in the provided context, reply:
+            "Not enough information in the provided context."
+            STRICT RULES:
+            - Do NOT use prior knowledge
+            - Do NOT guess or assume
+            - Do NOT add features not explicitly stated in the context
+            Context:
             {context}
-
-            Question: {question}
-
-            Provide a comprehensive answer based ONLY on the provided context.
-            If the context doesn’t contain enough information, say so explicitly.
+            Question:
+            {question}
+            Your Answer:
             """
 
             response = ollama.chat(
                 model=model_name,
                 messages=[{"role": "user", "content": prompt}],
                 options={"temperature": temperature},
+                
             )
 
             # === Step 7: Return Answer & Sources ===
@@ -913,8 +920,9 @@ class PDFProcessor:
 
             for chunk in top_ranked_chunks[:3]:
                 metadata = chunk.get("metadata", {})
+                source = str(metadata.get("source", "Unknown")).replace("\\", "/")
                 result["sources"].append({
-                    "file": metadata.get("source", "Unknown").split("/")[-1],
+                    "file": source.split("/")[-1],
                     "content": chunk.get("text", ""),
                     "category": metadata.get("category", "unknown"),
                 })

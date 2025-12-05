@@ -355,6 +355,8 @@ async def create_organization_app_config(
     config_data = {
         "llm_model": organization_app_config.llm_model,
         "embedding_model": organization_app_config.embedding_model,
+        "query_model": organization_app_config.query_model,
+        "tags_model": organization_app_config.tags_model,
         "temperature": organization_app_config.temperature,
         "system_prompt": organization_app_config.system_prompt,
         "organization_id": organization_id,
@@ -390,6 +392,8 @@ async def get_updated_app_config(organization_id: str):
             "_id": "default_config_id",
             "llm_model": "gemma2:2b",
             "embedding_model": "sentence-transformers/all-MiniLM-L6-v2",
+            "query_model": "qwen3:8b",
+            "tags_model": "phi4-mini:3.8b",
             "temperature": 0.7,
             "system_prompt": "You are a helpful assistant that helps users to answer questions based on the context provided. If you don't know the answer, just say that you don't know. Do not make up answers. Keep the answer as concise as possible.",
             "organization_id": organization_id,

@@ -39,6 +39,8 @@ class UpdateCategorySchema(BaseModel):
 class CreateOrganizationAppConfigSchema(BaseModel):
     llm_model: str
     embedding_model: str
+    query_model: str
+    tags_model: str
     temperature: float
     system_prompt: str
     organization_id: str = "default_org"

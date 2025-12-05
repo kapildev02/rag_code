@@ -314,7 +314,7 @@ async def send_user_message(chat_id: str, user_id: str, message: SendUserMessage
             print(f'expanded_query without user_queries: {expanded_query}')
         else:
             conversation = [{"role": "user", "content": q["content"]} for q in user_queries]
-            expanded_query = await expand_user_query(conversation, message.content)
+            expanded_query = await expand_user_query(conversation, message.content, user_id)
             print(f'expanded_query with user_queries: {expanded_query}')
 
         # Store expanded query in user_query_collection

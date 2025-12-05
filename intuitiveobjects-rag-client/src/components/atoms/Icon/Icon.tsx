@@ -1,5 +1,5 @@
 interface IconProps {
-  name: "chat" | "plus" | "menu" | "send" | "user";
+  name: "chat" | "plus" | "menu" | "send" | "user" | "file upload";
   className?: string;
 }
 
@@ -40,7 +40,16 @@ export const Icon = ({ name, className = "" }: IconProps) => {
         d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"
       />
     ),
+    "file upload": (
+      <path
+        strokeLinecap="round" 
+        strokeLinejoin="round"
+        strokeWidth={2}
+        d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M4 12l4-4m0 0l4 4m-4-4v12"
+      />
+    ),
   };
+
 
   return (
     <svg

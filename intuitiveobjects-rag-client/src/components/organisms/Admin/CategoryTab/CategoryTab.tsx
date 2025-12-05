@@ -8,10 +8,12 @@ import { TrashIcon } from "@/components/atoms/Icon/Trash";
 import { confirmAction, showSuccess, showError } from "@/utils/sweetAlert";
 import { ResponsiveTable } from "@/components/atoms/ResponsiveTable/ResponsiveTable";
 import { toast } from "react-hot-toast";
+import { Plus, Trash2, Tag } from "lucide-react";
+import { motion } from "framer-motion";
 
 const initialCategoryFormState = {
 	name: "",
-	tags: [] as string[], // Explicitly type as string array
+	tags: [] as string[],
 };
 
 export const CategoryTab = () => {
@@ -22,20 +24,18 @@ export const CategoryTab = () => {
 	const categoryForm = useFormValidation(initialCategoryFormState, validateCategoryForm);
 
 	const handleAddCategory = () => {
-		// Ensure tags are properly formatted before sending
 		const category = {
 			name: categoryForm.values.name,
-			tags: categoryForm.values.tags.filter(tag => tag.trim().length > 0) // Filter out empty tags
+			tags: categoryForm.values.tags.filter(tag => tag.trim().length > 0)
 		};
 		
 		dispatch(orgCreateCategoryApi(category)).then((response) => {
 			if (response.meta.requestStatus === "fulfilled") {
-				toast.success("Category added!");
+				toast.success("Category added successfully!");
 				categoryForm.onReset();
-				// Refresh categories list
 				dispatch(orgGetCategoriesApi());
 			} else {
-				toast.error("Failed to add category, or category may already exist.");
+				toast.error("Failed to add category");
 			}
 		});
 	};
@@ -58,88 +58,108 @@ export const CategoryTab = () => {
 		dispatch(orgGetCategoriesApi());
 	}, []);
 
-	// Define columns for the responsive table
 	const columns = [
 		{
 			key: "name",
 			header: "Category Name",
 			render: (value: string) => (
-				<div className="flex items-center">
-					<div className="text-sm font-medium text-gray-400 truncate max-w-xs">{value}</div>
+				<div className="flex items-center gap-2">
+					<div className="p-2 bg-primary-100 dark:bg-primary-900/30 rounded-lg">
+						<Tag className="w-4 h-4 text-primary-600 dark:text-primary-400" />
+					</div>
+					<span className="font-medium text-gray-900 dark:text-white">{value}</span>
 				</div>
 			),
 		},
-
 		{
 			key: "tags",
 			header: "Tags",
 			render: (tags?: string[]) => {
-            const safeTags = tags ?? [];
-            return (
-                 <div className="flex flex-wrap gap-2">
-                 {safeTags.length > 0 ? (
-                 safeTags.map((tag, index) => (
-                 <span
-                   key={index}
-                   className="bg-blue-100 text-blue-800 text-xs font-medium mr-2 px-2.5 py-0.5 rounded dark:bg-blue-200 dark:text-blue-800">
-                   {tag}
-                 </span>
-                ))
-               ) : (
-               <span className="text-gray-500 text-sm">No tags</span>
-      )}
-    </div>
-  );
-}
-
+				const safeTags = tags ?? [];
+				return (
+					<div className="flex flex-wrap gap-2">
+						{safeTags.length > 0 ? (
+							safeTags.map((tag, index) => (
+								<motion.span
+									key={index}
+									initial={{ scale: 0.8, opacity: 0 }}
+									animate={{ scale: 1, opacity: 1 }}
+									className="bg-accent-100 dark:bg-accent-900/30 text-accent-700 dark:text-accent-300 text-xs font-semibold px-3 py-1 rounded-full"
+								>
+									{tag}
+								</motion.span>
+							))
+						) : (
+							<span className="text-gray-500 dark:text-gray-400 text-sm">No tags</span>
+						)}
+					</div>
+				);
+			},
 		},
 		{
 			key: "id",
 			header: "Actions",
 			className: "text-right",
 			render: (id: string) => (
-				<button onClick={() => handleRemoveCategory(id)} className="text-red-600 hover:text-red-900 focus:outline-none">
-					<TrashIcon />
-				</button>
+				<motion.button
+					whileHover={{ scale: 1.1 }}
+					whileTap={{ scale: 0.95 }}
+					onClick={() => handleRemoveCategory(id)}
+					className="p-2 text-red-600 hover:bg-red-100 dark:hover:bg-red-900/30 rounded-lg transition-colors"
+				>
+					<Trash2 className="w-4 h-4" />
+				</motion.button>
 			),
 		},
 	];
 
 	const handleTagChange = (e: React.ChangeEvent<HTMLInputElement>) => {
 		const tagInput = e.target.value;
-		
-		// Allow commas to be typed by storing raw input
 		categoryForm.setValues({
 			...categoryForm.values,
-			tags: tagInput.split('/').map(tag => tag.trim()).filter(Boolean)
+			tags: tagInput.split(',').map(tag => tag.trim()).filter(Boolean)
 		});
 	};
 
 	return (
-		<>
-			<h1 className="text-2xl font-semibold text-white mb-6">Category Management</h1>
+		<motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
 			<div className="mb-8">
-				<div className="flex flex-col sm:flex-row gap-4 sm:items-end">
-					<div className="flex-1">
+				<h1 className="text-3xl font-bold gradient-text mb-2">Category Management</h1>
+				<p className="text-gray-600 dark:text-gray-400">Create and manage document categories</p>
+			</div>
+
+			{/* Add Category Form */}
+			<div className="card mb-8">
+				<h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-6 flex items-center gap-2">
+					<Plus className="w-5 h-5 text-primary-500" />
+					Add New Category
+				</h2>
+
+				<div className="space-y-4">
+					<div>
+						<label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+							Category Name
+						</label>
 						<TextInput
-							label="Category Name"
 							type="text"
 							name="name"
 							error={categoryForm.errors.name}
 							value={categoryForm.values.name}
 							onChange={(e) => categoryForm.handleChange(e)}
-							placeholder="New category name"
+							placeholder="e.g., Financial Reports"
 						/>
 					</div>
-					<div className="flex-1">
+
+					<div>
+						<label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+							Tags (Comma separated)
+						</label>
 						<TextInput
-							label="Tags (Comma separated)"
 							type="text"
 							name="tags"
 							value={categoryForm.values.tags.join(',')}
 							onChange={handleTagChange}
 							onBlur={(e) => {
-								// Clean up tags on blur
 								const cleanTags = e.target.value
 									.split(',')
 									.map(tag => tag.trim())
@@ -149,38 +169,35 @@ export const CategoryTab = () => {
 									tags: cleanTags
 								});
 							}}
-							placeholder="e.g., tag_1, tag_2,tag_3"
+							placeholder="e.g., finance, quarterly, 2024"
 						/>
 					</div>
+
 					<Button
 						onClick={() => categoryForm.handleSubmit(handleAddCategory)}
 						disabled={!categoryForm.values.name.trim()}
-						className="w-full sm:w-auto">
+						className="w-full btn-primary"
+					>
+						<Plus className="w-4 h-4 mr-2" />
 						Add Category
 					</Button>
 				</div>
 			</div>
 
-			<div className="space-y-4">
-				<ResponsiveTable columns={columns} data={categories} emptyMessage="No categories added yet" isLoading={isLoading} />
+			{/* Categories Table */}
+			<div>
+				<h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">All Categories</h2>
+				<ResponsiveTable columns={columns} data={categories} emptyMessage="No categories yet" isLoading={isLoading} />
 			</div>
-		</>
+		</motion.div>
 	);
 };
 
-// Update form validation
 const validateCategoryForm = (values: typeof initialCategoryFormState) => {
 	const errors: Record<string, string> = {};
-	
 	if (!values.name.trim()) {
 		errors.name = "Category name is required";
 	}
-	
-	// Optional: validate tags
-	if (values.tags.some(tag => tag.trim().length === 0)) {
-		errors.tags = "Tags cannot be empty";
-	}
-	
 	return errors;
 };
 

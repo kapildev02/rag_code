@@ -118,7 +118,7 @@ const LocalFileUpload = ({
 
     // Convert FileList to Array and filter only PDF files
     const fileArray = Array.from(files);
-    // const pdfFiles = fileArray.filter(file => file.type === 'application/pdf');
+    // const pdfFiles = fileArray.filter(file => file.type === 'application/pdf',"application/zip");
     // Allowed MIME types and extensions
     const allowedTypes = [
       "application/pdf",
@@ -185,20 +185,20 @@ const LocalFileUpload = ({
       files: validFiles,
     });
 
-    // 	if (pdfFiles.length !== fileArray.length) {
-    // 		toast.error("Only PDF files are allowed");
-    // 	}
+  //   	if (pdfFiles.length !== fileArray.length) {
+  //   		toast.error("Only PDF files are allowed");
+  //   	}
 
-    // 	if (pdfFiles.length === 0) {
-    // 		toast.error("Please select at least one PDF file");
-    // 		return;
-    // 	}
+  //   	if (pdfFiles.length === 0) {
+  //   		toast.error("Please select at least one PDF file");
+  //   		return;
+  //   	}
 
-    // 	ingestionForm.setValues({
-    // 		...ingestionForm.values,
-    // 		files: pdfFiles,
-    // 	});
-  };
+  //   	ingestionForm.setValues({
+  //   		...ingestionForm.values,
+  //   		files: pdfFiles,
+  //   	});
+    };
 
   const handleRemoveFile = (index: number) => {
     const updatedFiles = ingestionForm.values.files.filter(
