@@ -94,3 +94,63 @@ export const editChatApi = createAsyncThunk(
     }
   }
 );
+
+export const userPublicFile = createAsyncThunk(
+  "orgAdmin/localFileUpload",
+  async (data: any, { rejectWithValue }) => {
+    try {
+      const formData = new FormData();
+
+      for (const file of data.files) {
+        formData.append("files", file); // Append each file separately
+      }
+
+      formData.append("category_id", data.category_id);
+      formData.append("tags", data.tags);
+
+      // This endpoint expects a user token (get_current_user). Use the user axios instance.
+      const response = await axiosUserInstance.post(
+        "organization-file/local-drive/upload",
+        formData,
+        {
+          headers: {
+            "Content-Type": "multipart/form-data",
+          },
+        }
+      );
+      return response.data;
+    } catch (error) {
+      return rejectWithValue(error);
+    }
+  }
+);
+
+export const userPrivateFile = createAsyncThunk(
+  "chat/sendUserPrivateFile",
+  async (data: any, { rejectWithValue }) => {
+    try {
+      const formData = new FormData();
+
+      for (const file of data.files) {
+        formData.append("files", file); // Append each file separately
+      }
+
+      formData.append("category_id", data.category_id);
+      formData.append("tags", data.tags);
+
+      // This endpoint expects a user token (get_current_user). Use the user axios instance.
+      const response = await axiosUserInstance.post(
+        `/chat/upload-file`,
+        formData,
+        {
+          headers: {
+            "Content-Type": "multipart/form-data",
+          },
+        }
+      );
+      return response.data;
+    } catch (error) {
+      return rejectWithValue(error);
+    }
+  }
+);

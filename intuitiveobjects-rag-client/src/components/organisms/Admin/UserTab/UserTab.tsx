@@ -10,6 +10,7 @@ import { validateUserForm } from "@/hooks/vaidate";
 import { orgCreateUserApi, orgGetUsersApi, orgGetCategoriesApi, orgDeleteUserApi } from "@/services/adminApi";
 import { showError, showSuccess, confirmAction } from "@/utils/sweetAlert";
 import { ResponsiveTable } from "@/components/atoms/ResponsiveTable/ResponsiveTable";
+import { Icon } from "@/components/atoms/Icon/Icon";
 
 
 const initialUserFormState = {
@@ -160,7 +161,13 @@ export const UserTab = () => {
 
 	return (
 		<>
-			<h1 className="text-2xl text-gray-400 font-semibold mb-6">User Management</h1>
+			<div className="mb-8">
+				<div className="flex items-center gap-3 mb-2">
+					<Icon name="user" className="w-8 h-8 text-primary-600 dark:text-primary-400" />
+					<h1 className="text-3xl font-bold gradient-text">User Management</h1>
+				</div>
+				<p className="text-gray-600 dark:text-gray-400">Create and manage your user</p>
+			</div>
 
 			{error && <div className="bg-red-100 border border-red-400 text-red-700 p-3 rounded-md mb-4">{error}</div>}
 
@@ -208,7 +215,8 @@ export const UserTab = () => {
 							required
 						/>
 					</div>
-					<Button type="submit" disabled={loading || !isFormValid()} className="w-full sm:w-auto mt-2">
+					<Button type="submit" disabled={loading || !isFormValid()}
+					 className="px-4 py-[9px] rounded-md transition-colors duration-200 disabled:opacity-50 bg-chat-border text-white hover:bg-hover-bg disabled:hover:bg-chat-border w-full btn-primary">
 						{loading ? "Adding..." : "Add User"}
 					</Button>
 				</form>

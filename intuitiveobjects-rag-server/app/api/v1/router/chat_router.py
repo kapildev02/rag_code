@@ -9,6 +9,8 @@ from app.schema.chat_schema import (
 )
 import app.services.chat_service as chat_service
 from app.utils.auth import get_current_user, AuthData
+from typing import List
+from fastapi import UploadFile, Form    
 
 chat_router = APIRouter()
 
@@ -96,3 +98,48 @@ async def update_user_message(
     """Update a specific user message by message ID."""
     result = await chat_service.update_user_message(chat_id, message_id, data, auth_data.user_id)
     return {"success": True, "message": "Message updated successfully", "data": result}
+
+@chat_router.post("/upload-file")
+async def upload_user_file(category_id: str = Form(...),
+    files: List[UploadFile] = Form(...),
+    tags: List[str] = Form(...),
+    auth_data: AuthData = Depends(get_current_user)
+):
+    
+    result = await chat_service.user_file_upload(
+        category_id,
+        files,
+        tags,
+        auth_data.user_id
+    )
+    
+    return {
+        "message": "File uploaded successfully",
+        "success": True,
+        "data": result
+    }
+
+# @chat_router.post("/upload")
+# async def upload_file(
+#     file: UploadFile = File(...),
+#     categoryId: str = Form(...),
+#     uploadedBy: str = Form(...)
+# ):
+#     # 🔹 Insert metadata same as admin upload
+#     metadata = {
+#         "filename": file.filename,
+#         "category": categoryId,
+#         "uploaded_by": uploadedBy,
+#         "is_public": True  # OR read from frontend dropdown
+#     }
+
+#     file_id = grid_fs.put(file.file.read(), filename=file.filename, metadata=metadata)
+
+#     # 🔹 Push file to RabbitMQ for processing
+#     rabbitmq_channel.basic_publish(
+#         exchange="",
+#         routing_key="md_upload",
+#         body=str(file_id)
+#     )
+
+#     return {"message": "Upload started", "file_id": str(file_id)}

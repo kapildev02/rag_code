@@ -50,7 +50,7 @@ export const ChatMessage = ({ content, sources, role, timestamp }: ChatMessagePr
                 <li key={index}>
                   <button
                     onClick={() => setSelectedSource(source)}
-                    className="text-blue-500 hover:underline"
+                    className="text-gray-300 hover:underline"
                   >
                     {source.file}
                   </button>

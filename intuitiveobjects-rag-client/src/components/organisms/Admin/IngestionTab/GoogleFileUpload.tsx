@@ -342,7 +342,7 @@ const GoogleFileUpload = ({
         <Button
           type="submit"
           disabled={isUploading || !isFormValid}
-          className="w-full sm:w-auto"
+          className="px-4 py-[9px] rounded-md transition-colors duration-200 disabled:opacity-50 bg-chat-border text-white hover:bg-hover-bg disabled:hover:bg-chat-border w-full btn-primary"
         >
           {isUploading
             ? "Uploading..."

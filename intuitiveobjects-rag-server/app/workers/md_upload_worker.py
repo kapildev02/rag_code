@@ -307,13 +307,12 @@ async def on_message(task: aio_pika.IncomingMessage):
     try:
         message = json.loads(task.body.decode())
 
-        # print(f"TASK: doc: {message["doc_id"]}, user: {message["user_id"]}")
-
         # doc id
         doc_id = message["doc_id"]
-        
+        #user id
         user_id = message["user_id"]
-        
+
+        print(f"Processing document ID: {doc_id} for user ID: {user_id}")
 
         doc_result = await document_collection().find_one(
             ObjectId(doc_id)
@@ -326,7 +325,9 @@ async def on_message(task: aio_pika.IncomingMessage):
         result = await category_collection().find_one({"_id": ObjectId(category_id)})
         category = result.get("name", "unknown")
         tags = result.get("tags", [])
+        source_type = doc_result.get("source_type", "unknown")
 
+        print("Source Type :", source_type) 
         print("Category :", category)
         print("Tags :", tags)
 
@@ -423,7 +424,7 @@ async def on_message(task: aio_pika.IncomingMessage):
         converted_md_files = Path(settings.MD_FILE_FOLDER_PATH) / doc_id
         print("converted_md_files", converted_md_files)
 
-        await processor.index_pdf(converted_md_files, category, doc_id, user_id,tags)
+        await processor.index_pdf(converted_md_files, category, doc_id, user_id,tags, source_type)
 
         await document_collection().update_one(
             {"_id": ObjectId(doc_id)},

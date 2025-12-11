@@ -6,8 +6,7 @@ from typing import List, Dict, Optional, Iterator, AsyncIterator
 from pathlib import Path
 import ollama
 from langchain.text_splitter import RecursiveCharacterTextSplitter
-# from langchain_community.vectorstores import Chroma
-from langchain_chroma import Chroma
+from langchain_community.vectorstores import Chroma
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_core.documents import Document
 import os
@@ -88,7 +87,7 @@ class PDFProcessor:
             return float('inf')
 
 
-    async def create_metadata(self,folder_path: str,category: str,tags: List[str],doc_id: str,user_id: str,source_type ,force_reprocess: bool = True) -> AsyncIterator[Dict]:
+    async def create_metadata(self,folder_path: str,category: str,tags: List[str],doc_id: str,user_id: str,source_type : str ,force_reprocess: bool = True) -> AsyncIterator[Dict]:
         """Extract text and contextual metadata from Markdown files in a folder or subfolders."""
         pages = []
         last_metadata = None
@@ -119,7 +118,7 @@ class PDFProcessor:
                         "section_num": i,
                         "category": category,
                         "source_type": source_type,
-                        "user_id": user_id,
+                        "uploaded_by": user_id,
                         "title": title,
                         "section_title": section_title,
                         "summary": content.get("summary", "Content available").strip(),
@@ -420,12 +419,13 @@ class PDFProcessor:
                     'section_num': str(page.get('section_num', '')),
                     'chunk_id': len(documents),
                     'source': str(page['source']),
-                    'source_type': str(page.get('source_type', 'unknown')),
-                    'user_id' : str(page.get('user_id', 'unknown')).strip().lower(),
                     'format': str(page.get('format', 'text')),
                     'chunk_name': str(chunk_name),
+                    "source_type": str(page.get('source_type', 'unknown')).strip().lower(),
+                    "uploaded_by": str(page.get('uploaded_by', 'unknown')).strip(),
++                   "uploaded_by_norm": str(page.get('uploaded_by', 'unknown')).strip().lower(),
                     'category': str(page.get('category', 'unknown')).strip().lower(),
-                    'file_tags': str(metadata),
+                    'file_Tags': str(metadata),
                 }
 
                 if 'tables' in page and page['tables']:
@@ -438,31 +438,52 @@ class PDFProcessor:
                     chunk_metadata['tables'] = "; ".join(tables_str)
 
                 documents.append(Document(
-                    page_content=chunk_text, 
+                    page_content=chunk_text,
                     metadata=chunk_metadata
                 ))
 
         return documents
             
     def save_to_chroma(self, chunks: List[Document]):
-        """Store processed chunks into ChromaDB."""
+        """Store processed chunks into separate ChromaDB collections based on source_type."""
         try:
-            # Ensure the persist directory exists
             if not os.path.exists(self.persist_directory):
                 os.makedirs(self.persist_directory)
 
-            # Create new collection and add documents
-            vectorstore = Chroma.from_documents(
-                documents=chunks,
-                collection_name="rag-chroma",
-                embedding=self.embedding_model,
-                persist_directory=self.persist_directory
-            )
+            # Separate chunks by source_type (normalized values)
+            public_chunks = [c for c in chunks if str(c.metadata.get("source_type", "")).strip().lower() in ("local_drive", "local")]
+            private_chunks = [c for c in chunks if str(c.metadata.get("source_type", "")).strip().lower() == "private_drive"]
 
-            # Store the vectorstore reference
-            self.vectorstore = vectorstore
+            logging.info(f"save_to_chroma: public_chunks={len(public_chunks)}, private_chunks={len(private_chunks)}")
 
-            logging.info(f"Successfully saved {len(chunks)} chunks to ChromaDB at {self.persist_directory}")
+            # Save public chunks to "rag-chroma-public" collection
+            if public_chunks:
+                vs_public = Chroma.from_documents(
+                    documents=public_chunks,
+                    collection_name="rag-chroma-public",
+                    embedding=self.embedding_model,
+                    persist_directory=self.persist_directory
+                )
+                # Quick verification: try a cheap similarity search
+                try:
+                    sample_public = vs_public.similarity_search("", k=1)  # empty string query; some stores accept it
+                    logging.info(f"save_to_chroma: verification PUBLIC returned {len(sample_public)} docs")
+                except Exception:
+                    logging.info("save_to_chroma: verification PUBLIC similarity_search failed (but collection created)")
+
+            # Save private chunks to "rag-chroma-private" collection
+            if private_chunks:
+                vs_private = Chroma.from_documents(
+                    documents=private_chunks,
+                    collection_name="rag-chroma-private",
+                    embedding=self.embedding_model,
+                    persist_directory=self.persist_directory
+                )
+                try:
+                    sample_private = vs_private.similarity_search("", k=1)
+                    logging.info(f"save_to_chroma: verification PRIVATE returned {len(sample_private)} docs")
+                except Exception:
+                    logging.info("save_to_chroma: verification PRIVATE similarity_search failed (but collection created)")
 
         except Exception as e:
             logging.error(f"Error saving to ChromaDB: {str(e)}")
@@ -502,32 +523,42 @@ class PDFProcessor:
         return chunks
 
     # Convert text into BM25 chunks
+
     def create_bm25_corpus(self, processed_pages: List[Dict], chunk_size: int = 50, overlap: int = 10):
-        """
-        Convert processed pages into BM25 corpus with smaller chunks.
-        """
-        texts=[]
-        corpus = []
+        """Create separate BM25 corpus for public and private chunks."""
+        texts_public = []
+        texts_private = []
+        corpus_public = []
+        corpus_private = []
+
         for page in processed_pages:
-            text = page['text']
+            text = page.get('text', '')
             category = page.get('category', 'unknown').strip().lower()
-            source = page.get('source', 'unknown').strip().lower()
-            user_id = page.get('user_id', 'unknown').strip().lower()
-            source_type = page.get('source_type', 'unknown').strip().lower()
+            user_id = str(page.get('uploaded_by', 'unknown')).strip().lower()
+            source_type = str(page.get('source_type', 'unknown')).strip().lower()
+            source = str(page.get('source', 'unknown')).strip().lower()
+
             sentences = self.split_into_sentences(text)
-            chunks = self.chunk_sentences(sentences, chunk_size, overlap)
-            # corpus.extend(chunks)
-            for chunk in chunks:
-                texts.append(chunk)
-                corpus.append({
+            chunk_texts = self.chunk_sentences(sentences, chunk_size, overlap)
+
+            for chunk in chunk_texts:
+                entry = {
                     "text": chunk,
                     "category": category,
-                    "user_id": user_id,
                     "source_type": source_type,
+                    "uploaded_by": user_id,
                     "source": source
-                })
-        
-        return texts, corpus
+                }
+
+                if source_type == "private_drive":
+                    texts_private.append(chunk)
+                    corpus_private.append(entry)
+                else:
+                    texts_public.append(chunk)
+                    corpus_public.append(entry)
+
+        return (texts_public, texts_private, corpus_public, corpus_private)
+
 
     # Build BM25 index
     def build_bm25(self, texts: List[str]):
@@ -536,31 +567,45 @@ class PDFProcessor:
         return bm25, texts, tokenized_corpus
 
     # Save BM25 index
-    def save_bm25_index(self, doc_id: str, bm25, texts: List[str], corpus: List[Dict], save_dir: str = BM25_STORE):
-            logging.info(f"Saving BM25 index for doc_id: {doc_id} at {save_dir}")
-            os.makedirs(save_dir, exist_ok=True)
-            logging.info(f"Ensured directory exists: {save_dir}")
-           
-            file_path = os.path.join(save_dir, f"bm25_index_{doc_id}.pkl")
-            logging.info(f"BM25 index file path: {file_path}")
-            data = {
-                "bm25": bm25,
-                "texts": texts,
-                'corpus': corpus
-
+    def save_bm25_index(self, doc_id: str, bm25_public, bm25_private, texts_public: List[str], 
+                   texts_private: List[str], corpus_public: List[Dict], corpus_private: List[Dict], 
+                   save_dir: str = BM25_STORE):
+        """Save separate BM25 indexes for public and private chunks."""
+        os.makedirs(save_dir, exist_ok=True)
+        
+        # Save public BM25 index
+        if corpus_public:
+            public_file_path = os.path.join(save_dir, f"bm25_index_public_{doc_id}.pkl")
+            public_data = {
+                "bm25": bm25_public,
+                "texts": texts_public,
+                "corpus": corpus_public
             }
-            logging.info(f"Prepared data for BM25 index with {len(texts)} texts and {len(corpus)} corpus entries")
             try:
-                with open(file_path, "wb") as f:
-                    logging.info(f"Opened file {file_path} for writing BM25 index")
-                    pickle.dump(data, f)
-                    logging.info(f"BM25 index data pickled successfully")
-                logging.info(f"BM25 index saved to {file_path}")
+                with open(public_file_path, "wb") as f:
+                    pickle.dump(public_data, f)
+                logging.info(f"PUBLIC BM25 index saved to {public_file_path}")
             except Exception as e:
-                logging.error(f"Failed to save BM25 index: {e}")
+                logging.error(f"Failed to save PUBLIC BM25 index: {e}")
+        
+        # Save private BM25 index
+        if corpus_private:
+            private_file_path = os.path.join(save_dir, f"bm25_index_private_{doc_id}.pkl")
+            private_data = {
+                "bm25": bm25_private,
+                "texts": texts_private,
+                "corpus": corpus_private
+            }
+            try:
+                with open(private_file_path, "wb") as f:
+                    pickle.dump(private_data, f)
+                logging.info(f"PRIVATE BM25 index saved to {private_file_path}")
+            except Exception as e:
+                logging.error(f"Failed to save PRIVATE BM25 index: {e}")
 
 
-    async def index_pdf(self, folder_path: str, category: str, doc_id: str, user_id: str, tags: List[str], source_type ,force_reindex: bool = False): 
+    async def index_pdf(self, folder_path: str, category: str, doc_id: str, user_id: str, 
+                   tags: List[str], source_type: str, force_reindex: bool = False): 
  
         try:
             
@@ -667,11 +712,25 @@ class PDFProcessor:
 
             try:
 
-                #Create BM25 corpus with smaller chunks
-                texts, bm25_corpus = self.create_bm25_corpus(processed_pages, chunk_size=50, overlap=10)
-                bm25, texts, tokenized_corpus = self.build_bm25(texts)
-                self.save_bm25_index(doc_id, bm25, texts, bm25_corpus, save_dir=BM25_STORE)
-                logging.info(f"BM25 index created for {folder_path}")
+                #Create BM25 corpus with separation
+                texts_public, texts_private, corpus_public, corpus_private = \
+                    self.create_bm25_corpus(processed_pages, chunk_size=50, overlap=10)
+                
+                # Build BM25 for public chunks
+                if texts_public:
+                    bm25_public, _, _ = self.build_bm25(texts_public)
+                else:
+                    bm25_public = None
+                
+                # Build BM25 for private chunks
+                if texts_private:
+                    bm25_private, _, _ = self.build_bm25(texts_private)
+                else:
+                    bm25_private = None
+                
+                self.save_bm25_index(doc_id, bm25_public, bm25_private, 
+                                    texts_public, texts_private, corpus_public, corpus_private)
+                logging.info(f"BM25 indexes created for {folder_path}")
 
             except Exception as e:
                 logging.error(f"Failed to save BM25 index for {folder_path}: {e}")
@@ -844,105 +903,80 @@ class PDFProcessor:
 
             metadata_query_result = [w for w in word_tokenize(question.lower()) if w not in stop_words]
 
-            # === Step 2: Chroma Retrieval ===
-            vectorstore = Chroma(
-                collection_name="rag-chroma",
-                embedding_function=self.embedding_model,
-                persist_directory=self.persist_directory,
-            )
-
-            retrieved_docs = []
-            category_filter = user_category.strip().lower()
-
-            # Try MMR first, fallback to similarity_search, then to unfiltered similarity
+            # === Step 2: Chroma Retrieval (PUBLIC + PRIVATE with access control) ===
+            all_retrieved_docs = []
+            
+             # Retrieve from PRIVATE collection - STRICT access control (use normalized uploader field)
             try:
-                retrieved_docs = vectorstore.max_marginal_relevance_search(
-                    question,
-                    k=10,
-                    fetch_k=50,
-                    lambda_mult=0.5,
-                    filter={"category": category_filter},
+                vectorstore_private = Chroma(
+                    collection_name="rag-chroma-private",
+                    embedding_function=self.embedding_model,
+                    persist_directory=self.persist_directory,
                 )
-            except Exception as e:
-                logging.warning(f"MMR failed: {str(e)}; falling back to similarity_search with filter")
+
+                private_docs = []
+                user_norm = str(user_id).strip().lower()
+
+                # Prefer server-side filter on normalized field if available
                 try:
-                    retrieved_docs = vectorstore.similarity_search(
+                    private_docs = vectorstore_private.similarity_search(
                         question,
                         k=10,
-                        filter={"category": category_filter}
+                        filter={"uploaded_by_norm": user_norm}
                     )
-                except Exception as e2:
-                    logging.warning(f"Similarity search with filter failed: {str(e2)}; trying unfiltered similarity_search")
-            # Debug: log count and types
-            logging.debug(f"Retrieved {len(retrieved_docs) if hasattr(retrieved_docs,'__len__') else 'N/A'} chroma docs")
+                except Exception as e1:
+                    logging.debug(f"Private search (uploaded_by_norm) failed: {e1}")
 
-            # Ensure we have Document-like objects before using filter_chunks_by_keywords
-            if not isinstance(retrieved_docs, list):
-                retrieved_docs = list(retrieved_docs)
+                # If store doesn't support that filter or returned nothing, try client-side fallback
+                if not private_docs:
+                    try:
+                        candidate_docs = vectorstore_private.similarity_search(question, k=30)
+                        for d in candidate_docs:
+                            md_uploaded_norm = str(d.metadata.get("uploaded_by_norm", "")).strip().lower()
+                            # also accept legacy uploaded_by in case older indexes were created without norm
+                            md_uploaded_raw = str(d.metadata.get("uploaded_by", "")).strip()
+                            if md_uploaded_norm == user_norm or md_uploaded_raw == str(user_id).strip():
+                                private_docs.append(d)
+                                if len(private_docs) >= 10:
+                                    break
+                    except Exception as e2:
+                        logging.debug(f"Private search fallback failed: {e2}")
 
-            filtered_chunks = self.filter_chunks_by_keywords(retrieved_docs, metadata_query_result)
-            # convert to dicts (convert_doc_to_dict expects a Document object)
-            chroma_dicts = []
-            for doc in filtered_chunks:
-                try:
-                    chroma_dicts.append(convert_doc_to_dict(doc))
-                except Exception:
-                    # doc already a dict-like object
-                    if isinstance(doc, dict):
-                        chroma_dicts.append({
-                            "text": doc.get("page_content") or doc.get("text") or "",
-                            "metadata": doc.get("metadata", {}),
-                            "chunk_id": doc.get("metadata", {}).get("chunk_id"),
-                            "score": None
-                        })
+                all_retrieved_docs.extend(private_docs)
+                logging.info(f"Retrieved {len(private_docs)} PRIVATE chunks for user {user_id}")
+            except Exception as e:
+                logging.warning(f"Private collection not found or search failed: {e}")
+            
+            if not all_retrieved_docs:
+                return {
+                    "answer": "No relevant context found. Try broadening your query or re-ingesting documents.",
+                    "sources": [],
+                    "status": "no_context"
+                }
+            
+            # === Step 3: BM25 Retrieval (PUBLIC + PRIVATE with access control) ===
+            bm25_dicts = run_bm25_keyword_search(
+                metadata_query_result, 
+                user_category.strip().lower(),
+                user_id  # Pass user_id for private chunk filtering
+            )
+            
+            filtered_chunks = self.filter_chunks_by_keywords(all_retrieved_docs, metadata_query_result)
             chroma_dicts = [convert_doc_to_dict(doc) for doc in filtered_chunks]
-
-            # === Step 3: BM25 Retrieval ===
-            bm25_dicts = run_bm25_keyword_search(metadata_query_result, user_category.strip().lower(),user_id=user_id)
-           
-
+            
             # === Step 4: Rerank & Merge ===
             reranked_chroma = rerank_results(question, chroma_dicts, top_k=10)
             reranked_bm25 = rerank_results(question, bm25_dicts, top_k=10)
-
+            
             combined_chunks = deduplicate_chunks(reranked_chroma + reranked_bm25)
             top_ranked_chunks = rerank_results(question, combined_chunks, top_k=10)
-            # print("-------------------------------------------------------------------------------------------")
-            # print("=== Reranked Chroma Chunks ===")
-            # print("-------------------------------------------------------------------------------------------")
-            # for i in reranked_chroma:
-            #     print("Reranked Chroma:", i.get("rerank_score"), i.get("metadata"), i.get("text"))
-            # print("-------------------------------------------------------------------------------------------")
-            # print("=== Reranked BM25 ===")
-            # print("-------------------------------------------------------------------------------------------")
-            # for i in reranked_bm25:
-            #     print("Reranked BM25:", i.get("rerank_score"), i.get("metadata", {}), i.get("text"))
-            # print("-------------------------------------------------------------------------------------------")
-            # print("=== Final Combined Chunks ===")
-            # print("-------------------------------------------------------------------------------------------")
-            # for i in top_ranked_chunks:
-            #     print("Final:", i.get("rerank_score"), i.get("metadata", {}), i.get("text"))
-
             if not top_ranked_chunks:
                 # return a clearer message or include a status field,
                 # so the frontend can distinguish "no context" vs. final answer.
                 return {"answer": "No relevant context found. Try broadening your query or re-ingesting documents.", "sources": [], "status": "no_context"}
-            
-            # Enforce access control: only include PRIVATE_DRIVE chunks owned by querying user
-            visible_chunks = []
-            for chunk in top_ranked_chunks:
-                meta = chunk.get("metadata", {}) if isinstance(chunk, dict) else getattr(chunk, "metadata", {}) or {}
-                source_type = meta.get("source_type", "")
-                if source_type == "PRIVATE_DRIVE" or source_type == "private_drive":
-                    if meta.get("user_id") == user_id:
-                        visible_chunks.append(chunk)
-                else:
-                    visible_chunks.append(chunk)
-
-                    
 
             # === Step 5: Format Context ===
-            context = "\n\n".join([format_chunk_for_context(chunk) for chunk in visible_chunks])
+            context = "\n\n".join([format_chunk_for_context(chunk) for chunk in top_ranked_chunks])
             print("-------------------------------------------------------------------------------------------")
             print("=== Final Context for LLM ===")
             print("-------------------------------------------------------------------------------------------")
@@ -977,7 +1011,7 @@ class PDFProcessor:
                 "sources": [],
             }
 
-            for chunk in visible_chunks[:3]:
+            for chunk in top_ranked_chunks[:3]:
                 metadata = chunk.get("metadata", {})
                 source = str(metadata.get("source", "Unknown")).replace("\\", "/")
                 result["sources"].append({
@@ -1033,75 +1067,98 @@ processor = PDFProcessor()
 
 
 
-def run_bm25_keyword_search(query: List[str], category: str, user_id: str = None, bm25_dir="./app/pipeline/bm25_store", top_n: int = 10) -> List[Dict]:
+def run_bm25_keyword_search(query: List[str], category: str, user_id: str = None,
+                           bm25_dir: str = "./app/pipeline/bm25_store", top_n: int = 5) -> List[Dict]:
     """
-    Performs BM25 keyword search across all saved indexes.
-    Returns top-N dicts strictly from the requested category.
-    Filters PRIVATE_DRIVE chunks by user_id (only owner can see them).
-    
-    Args:
-        query: list of query tokens
-        category: user's category filter
-        user_id: current user id (for PRIVATE_DRIVE access control)
-        bm25_dir: directory of BM25 indexes
-        top_n: number of top results to return
+    Performs BM25 keyword search with access control.
+
+    - Inspects `corpus` entries in each pickle. If entries include 'source_type',
+      we split public/private using that field.
+    - Private entries are only returned when uploaded_by/uploaded_by_norm matches user_id.
+    - Falls back gracefully for legacy structures.
     """
     results = []
-    print(f"Running BM25 keyword search for query: {query}, category: {category}, user_id: {user_id}")
-
     if not os.path.isdir(bm25_dir):
-        print(f"BM25 directory not found: {bm25_dir}")
+        logging.info(f"BM25 directory not found: {bm25_dir}")
         return []
 
     query_tokens = [q.lower() for q in query]
+    user_norm = str(user_id).strip().lower() if user_id else None
 
     for filename in os.listdir(bm25_dir):
         if not filename.endswith(".pkl"):
             continue
-
         file_path = os.path.join(bm25_dir, filename)
         try:
             with open(file_path, "rb") as f:
                 data = pickle.load(f)
-                bm25 = data["bm25"]
-                corpus = data["corpus"]  # [{text, category, user_id, source_type}, ...]
-
-            # Filter by category
-            filtered_corpus = [c for c in corpus if c.get("category") == category]
-            if not filtered_corpus:
-                continue
-            # Apply access control: exclude PRIVATE_DRIVE chunks not owned by user
-            for c in filtered_corpus:
-                if c.get("source_type") == "private_drive":
-                    if c.get("user_id") != user_id:
-                        print(f"Excluding PRIVATE_DRIVE chunk for user {user_id}")
-                        print(f"Excluded Chunk: {c}")
-                        filtered_corpus.remove(c)
-            
-            filtered_texts = [c["text"] for c in filtered_corpus]
-
-            # Run BM25 on filtered texts
-            top_results = bm25.get_top_n(query_tokens, filtered_texts, n=top_n)
-
-            # Convert back into dicts (with metadata preserved)
-            for t in top_results:
-                match = next((c for c in filtered_corpus if c["text"] == t), None)
-                if match:
-                    results.append({
-                        "text": t,
-                        "metadata": {
-                            "category": match.get("category", "unknown"),
-                            "source": match.get("source", "unknown"),
-                            "user_id": match.get("user_id", "unknown"),
-                            "source_type": match.get("source_type", "unknown")
-                        }
-                    })
-
         except Exception as e:
-            print(f"Failed to process BM25 index for {filename}: {e}")
+            logging.warning(f"Skipping BM25 file {filename}: failed to load ({e})")
+            continue
+
+        bm25 = data.get("bm25")
+        corpus = data.get("corpus", [])
+
+        # If corpus contains dict entries with metadata
+        if isinstance(corpus, list) and corpus and isinstance(corpus[0], dict):
+            public_entries = [c for c in corpus if c.get("source_type", "").lower() != "private_drive"]
+            private_entries = [c for c in corpus if c.get("source_type", "").lower() == "private_drive"]
+
+            # Public search (filter by category)
+            if public_entries and bm25 is not None:
+                public_texts = [c["text"] for c in public_entries if c.get("category", "") == category]
+                if public_texts:
+                    try:
+                        top_public = bm25.get_top_n(query_tokens, public_texts, n=top_n)
+                    except Exception:
+                        top_public = []
+                    for t in top_public:
+                        match = next((c for c in public_entries if c.get("text") == t and c.get("category", "") == category), None)
+                        if match:
+                            results.append({"text": t, "metadata": {"category": match.get("category", "unknown"), "source": match.get("source", "unknown"), "source_type": match.get("source_type", "local_drive")}})
+
+            # Private search (only if user provided)
+            if private_entries and bm25 is not None and user_norm:
+                filtered_private = []
+                for c in private_entries:
+                    uploaded_norm = str(c.get("uploaded_by_norm", "")).strip().lower()
+                    uploaded_raw = str(c.get("uploaded_by", "")).strip()
+                    if uploaded_norm == user_norm or uploaded_raw == str(user_id).strip():
+                        filtered_private.append(c)
+
+                if filtered_private:
+                    private_texts = [c["text"] for c in filtered_private]
+                    try:
+                        top_private = bm25.get_top_n(query_tokens, private_texts, n=top_n)
+                    except Exception:
+                        top_private = []
+                    for t in top_private:
+                        match = next((c for c in filtered_private if c.get("text") == t), None)
+                        if match:
+                            results.append({"text": t, "metadata": {"category": match.get("category", "unknown"), "source": match.get("source", "unknown"), "source_type": "private_drive"}})
+        else:
+            # Legacy fallback (use filename hint)
+            is_private_index = "private" in filename.lower()
+            try:
+                if bm25 is None:
+                    continue
+                texts = data.get("texts", []) if isinstance(data, dict) else []
+                if not texts:
+                    continue
+                top_results = bm25.get_top_n(query_tokens, texts, n=top_n)
+            except Exception:
+                continue
+
+            if is_private_index:
+                if not user_norm:
+                    continue
+                for t in top_results:
+                    results.append({"text": t, "metadata": {"category": category, "source": "unknown", "source_type": "private_drive"}})
+            else:
+                for t in top_results:
+                    results.append({"text": t, "metadata": {"category": category, "source": "unknown", "source_type": "local_drive"}})
 
     return results
-
 def convert_doc_to_dict(doc):
     return {
         "text": doc.page_content,

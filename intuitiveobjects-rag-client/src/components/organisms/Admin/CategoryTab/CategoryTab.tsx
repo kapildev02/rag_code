@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import React, { useEffect } from "react";
 import { Button } from "@/components/atoms/Button/Button";
 import { TextInput } from "@/components/atoms/TextInput";
 import useFormValidation from "@/hooks/useFormValidation";
@@ -10,6 +10,7 @@ import { ResponsiveTable } from "@/components/atoms/ResponsiveTable/ResponsiveTa
 import { toast } from "react-hot-toast";
 import { Plus, Trash2, Tag } from "lucide-react";
 import { motion } from "framer-motion";
+import { useState } from "react";
 
 const initialCategoryFormState = {
 	name: "",
@@ -20,8 +21,8 @@ export const CategoryTab = () => {
 	const dispatch = useAppDispatch();
 	const categories = useAppSelector((state) => state.admin.categories);
 	const isLoading = useAppSelector((state) => state.admin.loading);
-
 	const categoryForm = useFormValidation(initialCategoryFormState, validateCategoryForm);
+	const [tagsInput, setTagsInput] = useState("");
 
 	const handleAddCategory = () => {
 		const category = {
@@ -35,7 +36,7 @@ export const CategoryTab = () => {
 				categoryForm.onReset();
 				dispatch(orgGetCategoriesApi());
 			} else {
-				toast.error("Failed to add category");
+				toast.error("Failed to add category, or category already exists.");
 			}
 		});
 	};
@@ -113,14 +114,17 @@ export const CategoryTab = () => {
 		},
 	];
 
-	const handleTagChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-		const tagInput = e.target.value;
-		categoryForm.setValues({
-			...categoryForm.values,
-			tags: tagInput.split(',').map(tag => tag.trim()).filter(Boolean)
-		});
-	};
+	const handleTagBlur = (e: React.FocusEvent<HTMLInputElement>) => {
+    const cleanTags = e.target.value
+      .split(",")
+      .map(tag => tag.trim())
+      .filter(tag => tag.length > 0);
 
+    categoryForm.setValues({
+      ...categoryForm.values,
+      tags: cleanTags,
+    });
+  };
 	return (
 		<motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
 			<div className="mb-8">
@@ -151,27 +155,16 @@ export const CategoryTab = () => {
 					</div>
 
 					<div>
-						<label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-							Tags (Comma separated)
-						</label>
-						<TextInput
-							type="text"
-							name="tags"
-							value={categoryForm.values.tags.join(',')}
-							onChange={handleTagChange}
-							onBlur={(e) => {
-								const cleanTags = e.target.value
-									.split(',')
-									.map(tag => tag.trim())
-									.filter(tag => tag.length > 0);
-								categoryForm.setValues({
-									...categoryForm.values,
-									tags: cleanTags
-								});
-							}}
-							placeholder="e.g., finance, quarterly, 2024"
-						/>
-					</div>
+            <label className="block text-sm font-medium mb-2">Tags (Comma separated)</label>
+            <TextInput
+              type="text"
+              name="tags"
+              value={tagsInput}
+              onChange={(e) => setTagsInput(e.target.value)}
+              onBlur={handleTagBlur}
+              placeholder="e.g., finance, quarterly, 2024"
+            />
+          </div>
 
 					<Button
 						onClick={() => categoryForm.handleSubmit(handleAddCategory)}

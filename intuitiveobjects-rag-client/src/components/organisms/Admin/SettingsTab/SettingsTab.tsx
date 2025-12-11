@@ -106,7 +106,7 @@ export const SettingsTab = () => {
           <div className="flex items-center gap-2 mb-4">
             <Zap className="w-5 h-5 text-accent-500" />
             <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
-              LLM Model
+              LLM Model For Chat Responses
             </h2>
           </div>
           <Select

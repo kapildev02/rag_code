@@ -2,6 +2,7 @@ from app.models.organization_file_model import OrganizationFile
 from fastapi import UploadFile, HTTPException
 from app.db.mongodb import (
     organization_admin_collection,
+    organization_user_collection,
     organization_file_collection,
     get_fs,
     document_collection,
@@ -30,12 +31,20 @@ from app.utils.google import get_google_credentials
 async def organization_upload_file(
     category_id: str, file: UploadFile, tags: List[str], user_id: str
 ):
-    existing_organization_admin = await organization_admin_collection().find_one(
+    # Resolve organization id for the caller: admin OR normal organization user
+    print("Uploading file for user:", user_id)
+    existing_org_admin = await organization_admin_collection().find_one(
         {"_id": ObjectId(user_id)}
     )
-
-    if not existing_organization_admin:
-        raise HTTPException(status_code=404, detail="Organization admin not found")
+    if existing_org_admin:
+        organization_id = existing_org_admin["organization_id"]
+    else:
+        existing_org_user = await organization_user_collection().find_one(
+            {"_id": ObjectId(user_id)}
+        )
+        if not existing_org_user:
+            raise HTTPException(status_code=404, detail="User not found")
+        organization_id = existing_org_user["organization_id"]
 
 
     file_name = file.filename
@@ -46,11 +55,11 @@ async def organization_upload_file(
     grid_in = await get_fs().upload_from_stream(
         file.filename,
         file.file,
-        metadata={"contentType": file_type, "organizationId": existing_organization_admin["organization_id"]}
+        metadata={"contentType": file_type, "organizationId": organization_id}
     )
 
     file_data = OrganizationFile(
-        organization_id=existing_organization_admin["organization_id"],
+        organization_id=organization_id,
         category_id=category_id,
         file_name=file_name,
         file_type=file_type,
@@ -70,36 +79,41 @@ async def organization_upload_file(
 
 
 async def organization_get_files(user_id: str):
-    existing_organization_admin = await organization_admin_collection().find_one(
+    # allow admin OR organization user to fetch files for their organization
+    existing_org_admin = await organization_admin_collection().find_one(
         {"_id": ObjectId(user_id)}
     )
+    if existing_org_admin:
+        organization_id = existing_org_admin["organization_id"]
+    else:
+        existing_org_user = await organization_user_collection().find_one(
+            {"_id": ObjectId(user_id)}
+        )
+        if not existing_org_user:
+            raise HTTPException(status_code=404, detail="User not found")
+        organization_id = existing_org_user["organization_id"]
 
-    if not existing_organization_admin:
-        raise HTTPException(status_code=404, detail="Organization admin not found")
 
-    files = (
-        await document_collection()
-        .find({"organization_id": existing_organization_admin["organization_id"]})
-        .to_list(None)
-    )
+    files = (await document_collection().find({"organization_id": organization_id}).to_list(None))
 
     return OrganizationFileListEntity(files)
 
 
 async def organization_delete_file(file_id: str, user_id: str):
-    existing_organization_admin = await organization_admin_collection().find_one(
-        {"_id": ObjectId(user_id)}
-    )
+    # allow admin OR user who belongs to organization to delete (admin-only deletion is preserved if desired)
+    existing_org_admin = await organization_admin_collection().find_one({"_id": ObjectId(user_id)})
+    if existing_org_admin:
+        organization_id = existing_org_admin["organization_id"]
+    else:
+        existing_org_user = await organization_user_collection().find_one({"_id": ObjectId(user_id)})
+        if not existing_org_user:
+            raise HTTPException(status_code=404, detail="User not found")
+        organization_id = existing_org_user["organization_id"]
 
-    if not existing_organization_admin:
-        raise HTTPException(status_code=404, detail="Organization admin not found")
 
     print("Deleting file:", file_id)
     existing_file = await organization_file_collection().find_one(
-        {
-            "_id": ObjectId(file_id),
-            "organization_id": existing_organization_admin["organization_id"],
-        }
+        {"_id": ObjectId(file_id), "organization_id": organization_id}
     )
 
     if not existing_file:
@@ -114,15 +128,16 @@ async def organization_google_drive_upload_file(
     files_data: UploadGoogleDriveSchema,
     user_id: str
 ):
-    # get existing org admin for organization id
-    existing_org_admin = await organization_admin_collection().find_one({
-        "_id": ObjectId(user_id)
-    })
-    
-    # check organization admin exists
-    if not existing_org_admin:
-        raise HTTPException(status_code=404, detail="Organization admin not found")
-    
+    # resolve organization id from admin or normal user
+    existing_org_admin = await organization_admin_collection().find_one({"_id": ObjectId(user_id)})
+    if existing_org_admin:
+        organization_id = existing_org_admin["organization_id"]
+    else:
+        existing_org_user = await organization_user_collection().find_one({"_id": ObjectId(user_id)})
+        if not existing_org_user:
+            raise HTTPException(status_code=404, detail="User not found")
+        organization_id = existing_org_user["organization_id"]
+
     # check filedata exists in payload
     if not files_data.files or len(files_data.files) == 0:
         raise HTTPException(status_code=400, detail="Files required")
@@ -251,12 +266,22 @@ async def organization_local_drive_upload(
     tags: List[str],
     user_id: str
 ): 
-    existing_org_admin = await organization_admin_collection().find_one({
-        "_id": ObjectId(user_id)
-    })
-    
-    if not existing_org_admin:
-        raise HTTPException(status_code=404, detail="Organization admin not found")
+    existing_org_admin = await organization_admin_collection().find_one(
+        {"_id": ObjectId(user_id)}
+    )
+    if existing_org_admin:
+        organization_id = existing_org_admin["organization_id"]
+    else:
+        existing_org_user = await organization_user_collection().find_one(
+            {"_id": ObjectId(user_id)}
+        )
+        if not existing_org_user:
+            raise HTTPException(status_code=404, detail="User not found")
+        organization_id = existing_org_user["organization_id"]
+
+    if category_id == "someCategoryId":
+      category_id = existing_org_user["category_id"]
+
     
     if not files or len(files) == 0:
         raise HTTPException(status_code=400, detail="Files required")
@@ -279,7 +304,7 @@ async def organization_local_drive_upload(
             continue
         
         new_doc = {
-            "organization_id": existing_org_admin["organization_id"],
+            "organization_id": organization_id,
             "category_id": category_id,
             "filename": file.filename,
             "file_size": file.size,
@@ -327,7 +352,7 @@ async def organization_local_drive_upload(
         # check if the file already exist for the organization
         is_duplicate = await document_collection().find_one({
             "hash_key": hash_key,
-            "organization_id": existing_org_admin["organization_id"],
+            "organization_id": organization_id,
             "current_stage": "COMPLETED"
         })
         

@@ -46,9 +46,9 @@ export const ChatWindow = ({ isLoading, onload }: ChatWindowProps) => {
     >
       {/* Internal sticky header (combines Header features into chat view) */}
       <header className="sticky top-16 z-30 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 backdrop-blur-md bg-opacity-80 dark:bg-opacity-80">
-        <div className="mx-auto max-w-5xl px-4 sm:px-6 py-3 flex items-center justify-between gap-4">
+        {/* <div className="mx-auto max-w-5xl px-4 sm:px-6 py-3 flex items-center justify-between gap-4"> */}
           {/* ...existing header content... */}
-        </div>
+        {/* </div> */}
       </header>
 
       {/* Message Scroll Area */}
